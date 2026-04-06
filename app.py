@@ -86,7 +86,7 @@ def stream_parser(response):
         yield chunk.text
 
 # Estètica depenent de l'hora
-hora_actual = 16 #datetime.datetime.now().hour #23 #16
+hora_actual =  datetime.datetime.now().hour #23 #16
 
 if 6 <= hora_actual < 14:
     saludo = "Buenos días"
