@@ -102,14 +102,14 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# PANTALLA DE BENVINGUDA DINÀMICA
+# variació lletra benvinguda, mode clar o obscur
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
-            <h2 style='font-family: "Lora", serif; font-weight: 400; font-size: 2.6rem; color: #E8E8E8; letter-spacing: -0.5px;'>
+            <h2 style='font-family: "Lora", serif; font-weight: 400; font-size: 2.6rem; color: var(--text-color); letter-spacing: -0.5px;'>
                 <span style='font-size: 2.2rem; vertical-align: middle; margin-right: 12px;'>{icono_tiempo}</span>{saludo}, soy Lumi
             </h2>
-            <p style='font-family: "Inter", sans-serif; font-size: 1.1rem; color: #888; margin-top: -10px;'>¿En qué puedo ayudarle hoy?</p>
+            <p style='font-family: "Inter", sans-serif; font-size: 1.1rem; color: var(--text-color); opacity: 0.7; margin-top: -10px;'>¿En qué puedo ayudarle hoy?</p>
         </div>
     """, unsafe_allow_html=True)
 
