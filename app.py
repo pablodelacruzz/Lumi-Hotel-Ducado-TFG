@@ -3,7 +3,7 @@ import datetime
 import warnings
 import logging
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 from langchain_community.document_loaders import PyMuPDFLoader, CSVLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -48,8 +48,7 @@ st.markdown("""
 def iniciar_sistema():
     # Llegim la clau des dels "secrets" de Streamlit en lloc de posar-la al codi
     API_KEY = st.secrets["GEMINI_API_KEY"] 
-    genai.configure(api_key=API_KEY)
-    llm_model = genai.GenerativeModel('gemini-2.5-flash')
+    ai_client = genai.Client(api_key=API_KEY)
     
     documents = []
     
@@ -74,7 +73,7 @@ def iniciar_sistema():
     )
     db = Chroma.from_documents(documents=chunks, embedding=embedding_model) 
     
-    return db, llm_model
+    return db, ai_client
 
 vector_db, model = iniciar_sistema()
 
@@ -157,7 +156,10 @@ PREGUNTA DEL CLIENT:
 {pregunta}"""
             
             try:
-                response = model.generate_content(prompt_final, stream=True)
+                response = model.models.generate_content_stream(
+                    model='gemini-2.5-flash',
+                    contents=prompt_final
+                )
                 text_complet = st.write_stream(stream_parser(response))
                 
                 st.session_state.messages.append({"role": "assistant", "content": text_complet})
