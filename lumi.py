@@ -47,8 +47,8 @@ st.markdown("""
 
 @st.cache_resource
 def iniciar_sistema():
-    # Llegim la clau dde la api
-    API_KEY = st.secrets 
+    # Llegim la clau de la api
+    API_KEY = st.secrets
     ai_client = genai.Client(api_key=API_KEY)
     
     documents = []
@@ -103,7 +103,7 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# variació lletra benvinguda, mode clar o obscur (Actualitzat Apple Style)
+# variació lletra benvinguda
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
@@ -141,6 +141,7 @@ if pregunta:
             st.session_state.messages.append({"role": "assistant", "content": resposta_buida})
         else:
             context_text = "\n".join(context_recuperat)
+
             
             prompt_final = f"""Ets la Lumi, l'assistent virtual i la intel·ligència d'atenció al client de l'Hotel Ducado. 
 La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis un assistent virtual Premium d'un hotel de 5 estrelles.
