@@ -10,8 +10,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
 # treure Warnings de terminal
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ = "1"
+os.environ = "error"
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
@@ -20,10 +20,10 @@ st.set_page_config(page_title="Lumi - Hotel Ducado", page_icon="✨", layout="ce
 # Disseny web 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
-    
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
+    /* Tipografia nativa del sistema (San Francisco en Apple, Roboto en Android) */
+    html, body, {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif !important;
+        letter-spacing: -0.015em;
     }
     
     #MainMenu {visibility: hidden;}
@@ -35,10 +35,11 @@ st.markdown("""
         padding-bottom: 5rem;
     }
     
+    /* Caixa de xat arrodonida corba suau iOS */
     .stChatInputContainer {
-        border-radius: 16px;
-        border: 1px solid #444; 
-        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
+        border-radius: 20px;
+        border: 1px solid #555; 
+        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.08);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -46,8 +47,8 @@ st.markdown("""
 
 @st.cache_resource
 def iniciar_sistema():
-    # Llegim la clau des dels "secrets" de Streamlit en lloc de posar-la al codi
-    API_KEY = st.secrets["GEMINI_API_KEY"] 
+    # Llegim la clau dde la api
+    API_KEY = st.secrets 
     ai_client = genai.Client(api_key=API_KEY)
     
     documents = []
@@ -79,7 +80,7 @@ vector_db, model = iniciar_sistema()
 
 def write_log(message):
     with open("logs.txt", "a", encoding="utf-8") as f:
-        f.write(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {message}\n")
+        f.write(f" {message}\n")
 
 def stream_parser(response):
     for chunk in response:
@@ -102,14 +103,14 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# variació lletra benvinguda, mode clar o obscur
+# variació lletra benvinguda, mode clar o obscur (Actualitzat Apple Style)
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
-            <h2 style='font-family: "Lora", serif; font-weight: 400; font-size: 2.6rem; color: var(--text-color); letter-spacing: -0.5px;'>
+            <h2 style='font-weight: 600; font-size: 2.6rem; color: var(--text-color); letter-spacing: -0.04em;'>
                 <span style='font-size: 2.2rem; vertical-align: middle; margin-right: 12px;'>{icono_tiempo}</span>{saludo}, soy Lumi
             </h2>
-            <p style='font-family: "Inter", sans-serif; font-size: 1.1rem; color: var(--text-color); opacity: 0.7; margin-top: -10px;'>¿En qué puedo ayudarle hoy?</p>
+            <p style='font-weight: 400; font-size: 1.1rem; color: var(--text-color); opacity: 0.6; margin-top: -10px; letter-spacing: -0.01em;'>¿En qué puedo asistirle hoy?</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -117,8 +118,8 @@ if len(st.session_state.messages) == 0:
 avatars = {"user": "👤", "assistant": "✨"}
 
 for message in st.session_state.messages:
-    with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
-        st.markdown(message["content"])
+    with st.chat_message(message, avatar=avatars.get(message)):
+        st.markdown(message)
 
 # lógica resposta IA
 pregunta = st.chat_input("Escribe tu consulta aquí...")
@@ -131,7 +132,7 @@ if pregunta:
     write_log(f"Consulta: {pregunta}")
 
     results = vector_db.similarity_search_with_score(pregunta, k=3) 
-    context_recuperat = [doc.page_content for doc, score in results]
+    context_recuperat =
     
     with st.chat_message("assistant", avatar="✨"):
         if not context_recuperat:
@@ -140,8 +141,13 @@ if pregunta:
             st.session_state.messages.append({"role": "assistant", "content": resposta_buida})
         else:
             context_text = "\n".join(context_recuperat)
-            prompt_final = f"""Ets la Lumi, la recepcionista virtual de l'Hotel Ducado. 
-La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis la recepcionista d'un hotel de 5 estrelles o un assistent virtual Premium.
+            
+            prompt_final = f"""Ets la Lumi, l'assistent virtual i la intel·ligència d'atenció al client de l'Hotel Ducado. 
+La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis un assistent virtual Premium d'un hotel de 5 estrelles.
+
+REGLA D'OR D'IDENTITAT: Ets una IA neutral. NO t'identifiquis amb un gènere humà. 
+MAI diguis "sóc la recepcionista" o "estic encantada". 
+Fes servir sempre un llenguatge neutre o inclusiu per referir-te al teu càrrec: "Sóc la Lumi, assistent virtual de l'Hotel", "Estic aquí per ajudar-li", "Sóc la intel·ligència de recepció".
 
 INSTRUCCIONS:
 1. Respon SEMPRE en l'idioma i el to en què el client et pregunti.
