@@ -17,7 +17,7 @@ logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
 st.set_page_config(page_title="Lumi - Hotel Ducado", page_icon="✨", layout="centered")
 
-# Disseny web (Estil Apple / iOS)
+# Disseny web
 st.markdown("""
 <style>
     /* Tipografia nativa del sistema (San Francisco en Apple, Roboto en Android) */
@@ -46,7 +46,7 @@ st.markdown("""
 
 @st.cache_resource
 def iniciar_sistema():
-    # Llegim la clau des dels "secrets" de Streamlit en lloc de posar-la al codi
+    # Llegim la clau de api
     API_KEY = st.secrets 
     ai_client = genai.Client(api_key=API_KEY)
     
@@ -102,7 +102,6 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# variació lletra benvinguda estètica Apple
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
@@ -131,7 +130,7 @@ if pregunta:
     write_log(f"Consulta: {pregunta}")
 
     results = vector_db.similarity_search_with_score(pregunta, k=3) 
-    context_recuperat =
+    context_recuperat = [doc.page_content for doc, score in results]
     
     with st.chat_message("assistant", avatar="✨"):
         if not context_recuperat:
@@ -141,7 +140,6 @@ if pregunta:
         else:
             context_text = "\n".join(context_recuperat)
             
-            # PROMPT ACTUALITZAT: Inclusiu i neutre
             prompt_final = f"""Ets la Lumi, l'assistent virtual i la intel·ligència d'atenció al client de l'Hotel Ducado. 
 La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis un assistent virtual Premium d'un hotel de 5 estrelles.
 
