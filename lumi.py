@@ -83,7 +83,13 @@ def write_log(message):
 
 def stream_parser(response):
     for chunk in response:
-        yield chunk.text
+        try:
+            # Intentem extreure el text del paquet
+            if chunk.text:
+                yield chunk.text
+        except Exception:
+            # Si el paquet ve buit o amb dades internes de Google, l'ignorem i continuem
+            continue
 
 # Estètica depenent de l'hora
 hora_actual = 16 #datetime.datetime.now().hour #23 #16
