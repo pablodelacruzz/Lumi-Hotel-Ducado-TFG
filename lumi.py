@@ -10,18 +10,20 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
 # treure Warnings de terminal
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
 st.set_page_config(page_title="Lumi - Hotel Ducado", page_icon="✨", layout="centered")
 
-# Disseny web
+# Disseny web 
 st.markdown("""
 <style>
-    /* Tipografia nativa del sistema (San Francisco en Apple, Roboto en Android) */
-    html, body {
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif !important;
-        letter-spacing: -0.015em;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
     }
     
     #MainMenu {visibility: hidden;}
@@ -34,18 +36,18 @@ st.markdown("""
     }
     
     .stChatInputContainer {
-        border-radius: 20px; /* Corba més suau estil iOS */
+        border-radius: 16px;
         border: 1px solid #444; 
         box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
     }
 </style>
 """, unsafe_allow_html=True)
 
-API_KEY = st.secrets["GOOGLE_API_KEY"]
 
 @st.cache_resource
 def iniciar_sistema():
-    # Llegim la clau de api
+    # Llegim la clau des dels "secrets" de Streamlit en lloc de posar-la al codi
+    API_KEY = st.secrets["GEMINI_API_KEY"] 
     ai_client = genai.Client(api_key=API_KEY)
     
     documents = []
@@ -77,14 +79,14 @@ vector_db, model = iniciar_sistema()
 
 def write_log(message):
     with open("logs.txt", "a", encoding="utf-8") as f:
-        f.write(f" {message}\n")
+        f.write(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {message}\n")
 
 def stream_parser(response):
     for chunk in response:
         yield chunk.text
 
 # Estètica depenent de l'hora
-hora_actual = datetime.datetime.now().hour #23 #16
+hora_actual = 16 #datetime.datetime.now().hour #23 #16
 
 if 6 <= hora_actual < 14:
     saludo = "Buenos días"
@@ -100,13 +102,14 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# PANTALLA DE BENVINGUDA DINÀMICA
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
-            <h2 style='font-weight: 600; font-size: 2.6rem; color: var(--text-color); letter-spacing: -0.04em;'>
+            <h2 style='font-family: "Lora", serif; font-weight: 400; font-size: 2.6rem; color: #E8E8E8; letter-spacing: -0.5px;'>
                 <span style='font-size: 2.2rem; vertical-align: middle; margin-right: 12px;'>{icono_tiempo}</span>{saludo}, soy Lumi
             </h2>
-            <p style='font-weight: 400; font-size: 1.1rem; color: var(--text-color); opacity: 0.6; margin-top: -10px; letter-spacing: -0.01em;'>¿En qué puedo asistirle hoy?</p>
+            <p style='font-family: "Inter", sans-serif; font-size: 1.1rem; color: #888; margin-top: -10px;'>¿En qué puedo ayudarle hoy?</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -137,13 +140,8 @@ if pregunta:
             st.session_state.messages.append({"role": "assistant", "content": resposta_buida})
         else:
             context_text = "\n".join(context_recuperat)
-            
-            prompt_final = f"""Ets la Lumi, l'assistent virtual i la intel·ligència d'atenció al client de l'Hotel Ducado. 
-La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis un assistent virtual Premium d'un hotel de 5 estrelles.
-
-REGLA D'OR D'IDENTITAT: Ets una IA neutral. NO t'identifiquis amb un gènere humà. 
-MAI diguis "sóc la recepcionista" o "estic encantada". 
-Fes servir sempre un llenguatge neutre o inclusiu per referir-te al teu càrrec: "Sóc la Lumi, assistent virtual de l'Hotel", "Estic aquí per ajudar-li", "Sóc la intel·ligència de recepció".
+            prompt_final = f"""Ets la Lumi, la recepcionista virtual de l'Hotel Ducado. 
+La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis la recepcionista d'un hotel de 5 estrelles o un assistent virtual Premium.
 
 INSTRUCCIONS:
 1. Respon SEMPRE en l'idioma i el to en què el client et pregunti.
