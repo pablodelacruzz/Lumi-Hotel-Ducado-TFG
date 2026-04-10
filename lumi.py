@@ -17,13 +17,13 @@ logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
 st.set_page_config(page_title="Lumi - Hotel Ducado", page_icon="✨", layout="centered")
 
-# Disseny web 
+# Disseny web
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
-    
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
+    /* Tipografia nativa del sistema (San Francisco en Apple, Roboto en Android) */
+    html, body, {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif !important;
+        letter-spacing: -0.015em;
     }
     
     #MainMenu {visibility: hidden;}
@@ -36,9 +36,9 @@ st.markdown("""
     }
     
     .stChatInputContainer {
-        border-radius: 16px;
+        border-radius: 20px; /* Corba més suau estil iOS */
         border: 1px solid #444; 
-        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
+        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.08);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -108,14 +108,13 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# PANTALLA DE BENVINGUDA DINÀMICA
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
-            <h2 style='font-family: "Lora", serif; font-weight: 400; font-size: 2.6rem; color: #E8E8E8; letter-spacing: -0.5px;'>
+            <h2 style='font-weight: 600; font-size: 2.6rem; color: var(--text-color); letter-spacing: -0.04em;'>
                 <span style='font-size: 2.2rem; vertical-align: middle; margin-right: 12px;'>{icono_tiempo}</span>{saludo}, soy Lumi
             </h2>
-            <p style='font-family: "Inter", sans-serif; font-size: 1.1rem; color: #888; margin-top: -10px;'>¿En qué puedo ayudarle hoy?</p>
+            <p style='font-weight: 400; font-size: 1.1rem; color: var(--text-color); opacity: 0.6; margin-top: -10px; letter-spacing: -0.01em;'>¿En qué puedo asistirle hoy?</p>
         </div>
     """, unsafe_allow_html=True)
 
