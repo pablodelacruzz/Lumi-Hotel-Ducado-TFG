@@ -10,8 +10,6 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
 # treure Warnings de terminal
-os.environ = "1"
-os.environ = "error"
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
@@ -21,7 +19,7 @@ st.set_page_config(page_title="Lumi - Hotel Ducado", page_icon="✨", layout="ce
 st.markdown("""
 <style>
     /* Tipografia nativa del sistema (San Francisco en Apple, Roboto en Android) */
-    html, body, {
+    html, body {
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif !important;
         letter-spacing: -0.015em;
     }
@@ -47,7 +45,7 @@ st.markdown("""
 @st.cache_resource
 def iniciar_sistema():
     # Llegim la clau de api
-    API_KEY = st.secrets 
+    API_KEY = st.secrets["GOOGLE_API_KEY"]
     ai_client = genai.Client(api_key=API_KEY)
     
     documents = []
@@ -116,8 +114,8 @@ if len(st.session_state.messages) == 0:
 avatars = {"user": "👤", "assistant": "✨"}
 
 for message in st.session_state.messages:
-    with st.chat_message(message, avatar=avatars.get(message)):
-        st.markdown(message)
+    with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
+        st.markdown(message["content"])
 
 # lógica resposta IA
 pregunta = st.chat_input("Escribe tu consulta aquí...")
