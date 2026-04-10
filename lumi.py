@@ -41,11 +41,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+ API_KEY = st.secrets["GOOGLE_API_KEY"]
 
 @st.cache_resource
 def iniciar_sistema():
     # Llegim la clau de api
-    API_KEY = st.secrets["GOOGLE_API_KEY"]
     ai_client = genai.Client(api_key=API_KEY)
     
     documents = []
