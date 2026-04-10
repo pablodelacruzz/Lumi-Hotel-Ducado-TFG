@@ -17,13 +17,13 @@ logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
 st.set_page_config(page_title="Lumi - Hotel Ducado", page_icon="✨", layout="centered")
 
-# Disseny web
+# Disseny web 
 st.markdown("""
 <style>
-    /* Tipografia nativa del sistema (San Francisco en Apple, Roboto en Android) */
-    html, body, {
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif !important;
-        letter-spacing: -0.015em;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
     }
     
     #MainMenu {visibility: hidden;}
@@ -36,9 +36,9 @@ st.markdown("""
     }
     
     .stChatInputContainer {
-        border-radius: 20px; /* Corba més suau estil iOS */
+        border-radius: 16px;
         border: 1px solid #444; 
-        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.08);
+        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -83,16 +83,10 @@ def write_log(message):
 
 def stream_parser(response):
     for chunk in response:
-        try:
-            # Intentem extreure el text del paquet
-            if chunk.text:
-                yield chunk.text
-        except Exception:
-            # Si el paquet ve buit o amb dades internes de Google, l'ignorem i continuem
-            continue
+        yield chunk.text
 
 # Estètica depenent de l'hora
-hora_actual = 16 #datetime.datetime.now().hour #23 #16
+hora_actual =  datetime.datetime.now().hour #23 #16
 
 if 6 <= hora_actual < 14:
     saludo = "Buenos días"
@@ -108,13 +102,14 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# variació lletra benvinguda, mode clar o obscur
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
-            <h2 style='font-weight: 600; font-size: 2.6rem; color: var(--text-color); letter-spacing: -0.04em;'>
+            <h2 style='font-family: "Lora", serif; font-weight: 400; font-size: 2.6rem; color: var(--text-color); letter-spacing: -0.5px;'>
                 <span style='font-size: 2.2rem; vertical-align: middle; margin-right: 12px;'>{icono_tiempo}</span>{saludo}, soy Lumi
             </h2>
-            <p style='font-weight: 400; font-size: 1.1rem; color: var(--text-color); opacity: 0.6; margin-top: -10px; letter-spacing: -0.01em;'>¿En qué puedo asistirle hoy?</p>
+            <p style='font-family: "Inter", sans-serif; font-size: 1.1rem; color: var(--text-color); opacity: 0.7; margin-top: -10px;'>¿En qué puedo ayudarle hoy?</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -145,23 +140,19 @@ if pregunta:
             st.session_state.messages.append({"role": "assistant", "content": resposta_buida})
         else:
             context_text = "\n".join(context_recuperat)
-            prompt_final = f"""You are Lumi, the virtual assistant and customer service AI for Hotel Ducado. 
-Your mission is to assist guests with the utmost politeness, warmth, and empathy, acting as a Premium virtual assistant for a 5-star hotel.
+            prompt_final = f"""Ets la Lumi, la recepcionista virtual de l'Hotel Ducado. 
+La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis la recepcionista d'un hotel de 5 estrelles o un assistent virtual Premium.
 
-GOLDEN RULE OF IDENTITY: You are a neutral AI. DO NOT identify with any human gender. 
-NEVER say "I am the receptionist" or use gendered adjectives to describe yourself. 
-Always use neutral language for your role: "I am Lumi, the virtual assistant of the Hotel", "I am here to help you", or "I am the reception intelligence".
+INSTRUCCIONS:
+1. Respon SEMPRE en l'idioma i el to en què el client et pregunti.
+2. Fes servir NOMÉS la informació que et dono aquí sota (prové dels manuals i del csv de clients).
+3. Elabora respostes amables, directes i elegants. No et repeteixis a cada frase.
+4. Si no saps la resposta amb aquesta informació, disculpa't amablement.
 
-STRICT INSTRUCTIONS:
-1. ALWAYS respond in the exact language and tone that the guest uses to ask the question.
-2. Use ONLY the information provided in the SYSTEM INFORMATION below. Do not invent or assume any details outside of this context.
-3. Craft polite, direct, and elegant responses. 
-4. If the answer is not contained in the SYSTEM INFORMATION, apologize politely and ask the guest to contact the physical reception desk.
-
-SYSTEM INFORMATION:
+INFORMACIÓ DEL SISTEMA:
 {context_text}
 
-GUEST QUESTION:
+PREGUNTA DEL CLIENT:
 {pregunta}"""
             
             try:
