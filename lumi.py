@@ -41,7 +41,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
- API_KEY = st.secrets["GOOGLE_API_KEY"]
+API_KEY = st.secrets["GOOGLE_API_KEY"]
 
 @st.cache_resource
 def iniciar_sistema():
