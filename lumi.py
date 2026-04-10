@@ -17,7 +17,7 @@ logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
 st.set_page_config(page_title="Lumi - Hotel Ducado", page_icon="✨", layout="centered")
 
-# Disseny web 
+# Disseny web (Estil Apple / iOS)
 st.markdown("""
 <style>
     /* Tipografia nativa del sistema (San Francisco en Apple, Roboto en Android) */
@@ -35,11 +35,10 @@ st.markdown("""
         padding-bottom: 5rem;
     }
     
-    /* Caixa de xat arrodonida corba suau iOS */
     .stChatInputContainer {
-        border-radius: 20px;
-        border: 1px solid #555; 
-        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.08);
+        border-radius: 20px; /* Corba més suau estil iOS */
+        border: 1px solid #444; 
+        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -47,8 +46,8 @@ st.markdown("""
 
 @st.cache_resource
 def iniciar_sistema():
-    # Llegim la clau de la api
-    API_KEY = st.secrets
+    # Llegim la clau des dels "secrets" de Streamlit en lloc de posar-la al codi
+    API_KEY = st.secrets 
     ai_client = genai.Client(api_key=API_KEY)
     
     documents = []
@@ -87,7 +86,7 @@ def stream_parser(response):
         yield chunk.text
 
 # Estètica depenent de l'hora
-hora_actual =  datetime.datetime.now().hour #23 #16
+hora_actual = datetime.datetime.now().hour #23 #16
 
 if 6 <= hora_actual < 14:
     saludo = "Buenos días"
@@ -103,7 +102,7 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# variació lletra benvinguda
+# variació lletra benvinguda estètica Apple
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
@@ -141,8 +140,8 @@ if pregunta:
             st.session_state.messages.append({"role": "assistant", "content": resposta_buida})
         else:
             context_text = "\n".join(context_recuperat)
-
             
+            # PROMPT ACTUALITZAT: Inclusiu i neutre
             prompt_final = f"""Ets la Lumi, l'assistent virtual i la intel·ligència d'atenció al client de l'Hotel Ducado. 
 La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis un assistent virtual Premium d'un hotel de 5 estrelles.
 
