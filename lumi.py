@@ -43,7 +43,7 @@ st.markdown("""
 # ══════════════════════════════════════════════════════════════════════════════
 
 CHROMA_DIR        = ".chroma_store"   # persisted index — survives restarts
-RELEVANCE_THRESHOLD = 0.45            # cosine distance cutoff (lower = more similar)
+RELEVANCE_THRESHOLD = 1.2            # cosine distance cutoff (lower = more similar)
 RETRIEVAL_K       = 8                 # candidates fetched from Chroma
 MAX_CONTEXT_CHUNKS = 5               # max chunks passed to Gemini
 
@@ -159,14 +159,13 @@ def load_ai_client():
 
 def filter_and_deduplicate(results: list, threshold: float, max_k: int) -> list:
     """
-    1. Keep only chunks below the relevance threshold.
-    2. If nothing passes, fall back to the top-2 candidates.
-    3. Deduplicate near-identical chunks (same leading 80 chars).
-    4. Return at most max_k items.
+    Prefer chunks below threshold, but always return something.
+    Deduplicates near-identical chunks.
     """
+    # Prefer relevant chunks, but never return empty
     relevant = [(doc, score) for doc, score in results if score < threshold]
     if not relevant:
-        relevant = results[:2]  # graceful fallback
+        relevant = results  # use everything rather than nothing
 
     seen, deduplicated = set(), []
     for doc, score in relevant[:max_k]:
@@ -179,11 +178,8 @@ def filter_and_deduplicate(results: list, threshold: float, max_k: int) -> list:
 
 
 def is_context_sufficient(chunks_with_scores: list, threshold: float) -> bool:
-    """True only when at least one chunk is clearly on-topic."""
-    if not chunks_with_scores:
-        return False
-    best_score = min(score for _, score in chunks_with_scores)
-    return best_score < threshold
+    """Only block if retrieval returned nothing at all."""
+    return len(chunks_with_scores) > 0
 
 
 def format_context(chunks_with_scores: list) -> str:
@@ -233,6 +229,8 @@ def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
     # ── Retrieval ─────────────────────────────────────────────────────────────
     with st.spinner("Consultando los registros del hotel…"):
         raw_results = vector_db.similarity_search_with_score(pregunta, k=RETRIEVAL_K)
+        # 👇 ADD THIS — remove after tuning
+        st.write({doc.page_content[:60]: round(score, 4) for doc, score in raw_results[:5]})
         relevant    = filter_and_deduplicate(raw_results, RELEVANCE_THRESHOLD, MAX_CONTEXT_CHUNKS)
 
     # ── Insufficient context guard ────────────────────────────────────────────
