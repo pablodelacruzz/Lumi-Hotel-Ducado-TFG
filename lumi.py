@@ -83,15 +83,10 @@ def write_log(message):
 
 def stream_parser(response):
     for chunk in response:
-        try:
-            # Intentem extreure el text del paquet
-            if chunk.text:
-                yield chunk.text
-        except Exception:
-            # Si el paquet ve buit o amb dades internes de Google, l'ignorem i continuem
-            continue
+        yield chunk.text
+
 # Estètica depenent de l'hora
-hora_actual = datetime.datetime.now().hour #23 #16
+hora_actual =  datetime.datetime.now().hour #23 #16
 
 if 6 <= hora_actual < 14:
     saludo = "Buenos días"
@@ -107,6 +102,7 @@ else:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# variació lletra benvinguda, mode clar o obscur
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
@@ -144,7 +140,7 @@ if pregunta:
             st.session_state.messages.append({"role": "assistant", "content": resposta_buida})
         else:
             context_text = "\n".join(context_recuperat)
-            prompt_final = f"""Ets Lumi, assistent virtual de l'Hotel Ducado. 
+            prompt_final = f"""Ets la Lumi, la recepcionista virtual de l'Hotel Ducado. 
 La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis la recepcionista d'un hotel de 5 estrelles o un assistent virtual Premium.
 
 INSTRUCCIONS:
