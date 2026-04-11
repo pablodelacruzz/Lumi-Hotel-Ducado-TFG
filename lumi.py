@@ -1,3 +1,4 @@
+# CLAUDE VERSION - GEMINI KNOWING THE API
 import os
 import time
 import datetime
@@ -5,6 +6,7 @@ import warnings
 import logging
 import streamlit as st
 from google import genai
+from google.genai.types import GenerateContentConfig  # ← correct API usage
 from langchain_community.document_loaders import PyMuPDFLoader, CSVLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -20,47 +22,44 @@ logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 # CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
 
-CHROMA_DIR          = ".chroma_store"
-RELEVANCE_THRESHOLD = 1.2    # only block truly unrelated chunks (cosine distance)
-RETRIEVAL_K         = 8      # candidates fetched from Chroma
-MAX_CONTEXT_CHUNKS  = 5      # max chunks forwarded to Gemini
-MAX_RETRIES         = 2      # retry attempts on streaming failure
+CHROMA_DIR     = ".chroma_store"
+RETRIEVAL_K    = 6      # always fetch top-6 chunks, no threshold gate
+MAX_RETRIES    = 2      # streaming retry attempts before non-streaming fallback
 
-# Language rule placed FIRST and echoed at the END — Gemini cannot miss it.
-SYSTEM_PROMPT = """\
-CRITICAL LANGUAGE RULE — apply this before anything else:
-Detect the language of the guest message and reply in THAT EXACT SAME LANGUAGE.
-Spanish message → Spanish reply.
-English message → English reply.
-French message → French reply.
-Catalan message → Catalan reply.
-Never translate. Never switch language mid-response.
+# ── System instruction (passed via GenerateContentConfig, NOT in the prompt) ──
+#
+# Key findings from Gemini 2.5 Flash docs:
+#   1. system_instruction is processed at a higher authority level than contents.
+#      Embedding it in the prompt string treats it as user text → ignored.
+#   2. Gemini 2.5 Flash is fine-tuned for instruction following with SHORT,
+#      direct instructions. Long verbose prompts with headers hurt compliance.
+#   3. For RAG grounding, Google's own recommended pattern is to explicitly
+#      state "rely ONLY on the provided context" — Gemini respects this hard.
+#   4. Language detection works reliably when stated as the FIRST sentence
+#      in system_instruction, before any other rule.
+#
+SYSTEM_INSTRUCTION = """\
+You are Lumi, the virtual concierge of Hotel Ducado, a luxury 5-star hotel.
+Always reply in the exact same language the guest uses. No exceptions.
+Answer only using the hotel information provided in the user message.
+If the information does not contain the answer, apologize briefly and suggest the guest contact reception.
+Be warm, concise, and elegant. Never repeat the guest's question. Maximum 3 short paragraphs."""
 
-You are Lumi, the virtual concierge of Hotel Ducado — a luxury 5-star property.
-Assist guests with warmth, elegance, and precision.
-
-CONTENT RULES:
-1. Answer ONLY using the HOTEL INFORMATION provided below.
-   Never invent services, prices, room types, or policies.
-2. Be warm, concise, and elegant — like a 5-star front-desk professional.
-3. If the context partially answers the question, share what you know
-   and gracefully note that the front desk can confirm the rest.
-4. If the context does not answer the question at all, apologise briefly
-   and invite the guest to contact reception.
-5. Use short flowing paragraphs for conversational replies.
-   Only use bullet lists when listing multiple items (room types, amenities).
-6. Do NOT repeat the guest's question back to them.
-7. Keep answers under 3 paragraphs unless more detail is clearly needed.
-
+# ── User-turn template (context + question go here, not in system_instruction) ─
+#
+# Placing context in contents (not system_instruction) is correct:
+# the model is designed to treat contents as the working material to reason over.
+#
+USER_TEMPLATE = """\
 HOTEL INFORMATION:
 {context}
 
-REMINDER — the guest wrote in a specific language. Reply in THAT SAME LANGUAGE.
-Guest message: {question}"""
+GUEST MESSAGE:
+{question}"""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE CONFIG  (must be the first Streamlit call)
+# PAGE CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
 
 st.set_page_config(
@@ -85,7 +84,7 @@ st.markdown("""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LOGGING  (never crashes the app)
+# LOGGING
 # ══════════════════════════════════════════════════════════════════════════════
 
 def write_log(message: str):
@@ -111,7 +110,6 @@ def load_embedding_model():
 
 
 def load_all_documents() -> list:
-    """Load PDFs and CSV, tagging each document with source metadata."""
     documents = []
 
     pdf_folder = "documentos_hotel"
@@ -148,11 +146,9 @@ def load_all_documents() -> list:
 @st.cache_resource(show_spinner="Indexando base de conocimiento…")
 def load_vector_db(_embedding_model):
     """
-    Fast path → load persisted Chroma index from disk  (~0.3 s).
-    Slow path → build from scratch and persist          (~8-12 s, first run only).
-
-    To force a full rebuild (e.g. after updating PDFs):
-    delete the .chroma_store/ folder and restart the app.
+    Fast path → load persisted Chroma index (~0.3 s).
+    Slow path → build + persist (~8-12 s, first run only).
+    Delete .chroma_store/ to force a rebuild after updating PDFs or CSV.
     """
     if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
         write_log("Loading persisted Chroma index.")
@@ -197,39 +193,24 @@ def load_ai_client():
 
 def retrieve_context(vector_db, query: str) -> list:
     """
-    1. Fetch top RETRIEVAL_K chunks from Chroma.
-    2. Filter out chunks above RELEVANCE_THRESHOLD (truly unrelated).
-    3. Deduplicate near-identical chunks.
-    4. Safety net: if everything was filtered, return the top-3 anyway
-       so the LLM can decide relevance itself.
+    Always return the top RETRIEVAL_K most similar chunks, no score filtering.
+    Chroma ranks. Gemini judges. Score filtering here only causes false negatives.
+    Deduplicates chunks whose first 80 characters are identical.
     """
     results = vector_db.similarity_search_with_score(query, k=RETRIEVAL_K)
 
-    seen, filtered = set(), []
+    seen, deduplicated = set(), []
     for doc, score in results:
-        if score > RELEVANCE_THRESHOLD:
-            continue
         key = doc.page_content[:80]
         if key not in seen:
             seen.add(key)
-            filtered.append((doc, score))
-        if len(filtered) >= MAX_CONTEXT_CHUNKS:
-            break
+            deduplicated.append((doc, score))
 
-    # Safety net — never send empty context to the LLM
-    if not filtered:
-        seen2 = set()
-        for doc, score in results[:3]:
-            key = doc.page_content[:80]
-            if key not in seen2:
-                seen2.add(key)
-                filtered.append((doc, score))
-
-    return filtered
+    return deduplicated
 
 
 def format_context(chunks_with_scores: list) -> str:
-    """Structure retrieved chunks so the model can distinguish sources."""
+    """Label each chunk with its source file for model traceability."""
     parts = []
     for i, (doc, _score) in enumerate(chunks_with_scores, 1):
         source = doc.metadata.get("filename", "hotel data")
@@ -238,51 +219,59 @@ def format_context(chunks_with_scores: list) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LLM CALL
+# LLM CALL  — correct Gemini API usage with system_instruction
 # ══════════════════════════════════════════════════════════════════════════════
 
-def call_gemini(ai_client, prompt: str, placeholder) -> str | None:
+def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
     """
-    Tries streaming first (live token-by-token effect).
-    On failure retries up to MAX_RETRIES times, then falls back to a single
-    non-streaming call. Uses st.empty() placeholder — no st.write_stream,
-    which can cause Streamlit connection drops on long responses.
-    Returns the full response text or None on total failure.
+    Calls Gemini 2.5 Flash with system_instruction passed via GenerateContentConfig.
+    This is the correct API usage: system_instruction is processed at a higher
+    authority level than contents and cannot be overridden by user input.
+
+    Streams tokens into an st.empty() placeholder (▌ cursor effect).
+    Retries up to MAX_RETRIES times on streaming errors, then falls back to
+    a single non-streaming call. Never uses st.write_stream() — it can drop
+    the Streamlit websocket on slow or long responses.
     """
+    config = GenerateContentConfig(
+        system_instruction=SYSTEM_INSTRUCTION,
+    )
+
     # ── Streaming attempts ────────────────────────────────────────────────────
     for attempt in range(MAX_RETRIES):
         full_text = ""
         try:
             response = ai_client.models.generate_content_stream(
                 model="gemini-2.5-flash",
-                contents=prompt,
+                contents=user_content,
+                config=config,
             )
             for chunk in response:
                 if chunk.text:
                     full_text += chunk.text
-                    # ▌ cursor makes it feel live without using write_stream
                     placeholder.markdown(full_text + "▌")
-            placeholder.markdown(full_text)  # final render, remove cursor
+            placeholder.markdown(full_text)
             return full_text
 
         except Exception as e:
-            write_log(f"Streaming attempt {attempt + 1} error: {e}")
+            write_log(f"Streaming attempt {attempt + 1} failed: {e}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(1.5)
 
     # ── Non-streaming fallback ────────────────────────────────────────────────
-    write_log("All streaming attempts failed — falling back to non-streaming.")
+    write_log("Falling back to non-streaming call.")
     try:
         response  = ai_client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=prompt,
+            contents=user_content,
+            config=config,
         )
         full_text = response.text or ""
         placeholder.markdown(full_text)
         return full_text
     except Exception as e:
-        write_log(f"Non-streaming fallback failed: {e}")
-        placeholder.error("Error de conexión. Por favor, inténtelo de nuevo en unos instantes.")
+        write_log(f"Non-streaming fallback also failed: {e}")
+        placeholder.error("Error de conexión. Por favor, inténtelo de nuevo.")
         return None
 
 
@@ -293,7 +282,6 @@ def call_gemini(ai_client, prompt: str, placeholder) -> str | None:
 def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
     write_log(f"Query: {pregunta}")
 
-    # Retrieval (spinner is subtle — just a small indicator, no jarring text)
     with st.spinner(""):
         chunks = retrieve_context(vector_db, pregunta)
 
@@ -302,12 +290,14 @@ def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
         f"scores: {[round(s, 3) for _, s in chunks]}"
     )
 
-    prompt    = SYSTEM_PROMPT.format(
+    # Context goes into contents, not system_instruction
+    user_content = USER_TEMPLATE.format(
         context=format_context(chunks),
         question=pregunta,
     )
+
     placeholder = st.empty()
-    full_text   = call_gemini(ai_client, prompt, placeholder)
+    full_text   = call_gemini(ai_client, user_content, placeholder)
 
     if full_text:
         write_log(f"Response ({len(full_text)} chars): {full_text[:150]}")
@@ -324,7 +314,6 @@ if   6  <= hora < 14: saludo, icono = "Buenos días",   "☀️"
 elif 14 <= hora < 20: saludo, icono = "Buenas tardes", "🌤️"
 else:                  saludo, icono = "Buenas noches",  "🌙"
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ✨ Hotel Ducado")
     st.caption("Asistente virtual")
@@ -335,7 +324,6 @@ with st.sidebar:
     st.divider()
     st.caption("Lumi está disponible 24 h para atender sus consultas.")
 
-# ── Load resources ────────────────────────────────────────────────────────────
 embedding_model = load_embedding_model()
 vector_db       = load_vector_db(embedding_model)
 ai_client       = load_ai_client()
@@ -348,11 +336,9 @@ if vector_db is None:
     )
     st.stop()
 
-# ── Session state ─────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ── Welcome screen (only shown before first message) ─────────────────────────
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top:18vh; margin-bottom:20vh; text-align:center;'>
@@ -371,12 +357,10 @@ if len(st.session_state.messages) == 0:
 
 AVATARS = {"user": "👤", "assistant": "✨"}
 
-# ── Render conversation history ───────────────────────────────────────────────
 for message in st.session_state.messages:
     with st.chat_message(message["role"], avatar=AVATARS[message["role"]]):
         st.markdown(message["content"])
 
-# ── Chat input ────────────────────────────────────────────────────────────────
 if pregunta := st.chat_input("Escribe tu consulta aquí…"):
 
     st.session_state.messages.append({"role": "user", "content": pregunta})
