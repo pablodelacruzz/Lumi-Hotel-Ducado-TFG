@@ -1,4 +1,5 @@
 import os
+import time
 import datetime
 import warnings
 import logging
@@ -9,13 +10,59 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
-# ── Suppress noisy warnings ──────────────────────────────────────────────────
+# ── Suppress noisy warnings ───────────────────────────────────────────────────
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
-# ── Page config ───────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# CONSTANTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+CHROMA_DIR          = ".chroma_store"
+RELEVANCE_THRESHOLD = 1.2    # only block truly unrelated chunks (cosine distance)
+RETRIEVAL_K         = 8      # candidates fetched from Chroma
+MAX_CONTEXT_CHUNKS  = 5      # max chunks forwarded to Gemini
+MAX_RETRIES         = 2      # retry attempts on streaming failure
+
+# Language rule placed FIRST and echoed at the END — Gemini cannot miss it.
+SYSTEM_PROMPT = """\
+CRITICAL LANGUAGE RULE — apply this before anything else:
+Detect the language of the guest message and reply in THAT EXACT SAME LANGUAGE.
+Spanish message → Spanish reply.
+English message → English reply.
+French message → French reply.
+Catalan message → Catalan reply.
+Never translate. Never switch language mid-response.
+
+You are Lumi, the virtual concierge of Hotel Ducado — a luxury 5-star property.
+Assist guests with warmth, elegance, and precision.
+
+CONTENT RULES:
+1. Answer ONLY using the HOTEL INFORMATION provided below.
+   Never invent services, prices, room types, or policies.
+2. Be warm, concise, and elegant — like a 5-star front-desk professional.
+3. If the context partially answers the question, share what you know
+   and gracefully note that the front desk can confirm the rest.
+4. If the context does not answer the question at all, apologise briefly
+   and invite the guest to contact reception.
+5. Use short flowing paragraphs for conversational replies.
+   Only use bullet lists when listing multiple items (room types, amenities).
+6. Do NOT repeat the guest's question back to them.
+7. Keep answers under 3 paragraphs unless more detail is clearly needed.
+
+HOTEL INFORMATION:
+{context}
+
+REMINDER — the guest wrote in a specific language. Reply in THAT SAME LANGUAGE.
+Guest message: {question}"""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE CONFIG  (must be the first Streamlit call)
+# ══════════════════════════════════════════════════════════════════════════════
+
 st.set_page_config(
     page_title="Lumi — Hotel Ducado",
     page_icon="✨",
@@ -25,7 +72,6 @@ st.set_page_config(
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
-
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     #MainMenu, footer, header { visibility: hidden; }
     .block-container { padding-top: 3rem; padding-bottom: 5rem; }
@@ -39,43 +85,20 @@ st.markdown("""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CONSTANTS
+# LOGGING  (never crashes the app)
 # ══════════════════════════════════════════════════════════════════════════════
 
-CHROMA_DIR        = ".chroma_store"   # persisted index — survives restarts
-RELEVANCE_THRESHOLD = 1.2            # cosine distance cutoff (lower = more similar)
-RETRIEVAL_K       = 8                 # candidates fetched from Chroma
-MAX_CONTEXT_CHUNKS = 5               # max chunks passed to Gemini
-
-SYSTEM_PROMPT = """\
-You are Lumi, the virtual concierge of Hotel Ducado — a luxury 5-star property.
-Your role is to assist guests with warmth, elegance, and absolute precision.
-
-LANGUAGE RULE (non-negotiable):
-  Respond in the EXACT language the guest uses. If they write in Spanish → reply in Spanish.
-  English → English. French → French. Never mix languages.
-
-RESPONSE RULES:
-  1. Answer ONLY using the hotel information provided in the CONTEXT section below.
-     Never invent services, prices, room types, or policies.
-  2. Be warm, concise, and elegant — like a 5-star front-desk professional.
-  3. If the context partially answers the question, give what you know and
-     gracefully acknowledge what you cannot confirm.
-  4. If the context does not answer the question, apologise briefly and invite
-     the guest to contact the front desk for further assistance.
-  5. Use short, flowing paragraphs for conversational replies.
-     Only use lists when the question explicitly calls for one (e.g. room types, amenities).
-  6. Do NOT repeat the guest's question back to them.
-  7. Keep answers under 3 paragraphs unless a longer answer is clearly needed.
-
-CONTEXT:
-{context}
-
-Guest message: {question}"""
+def write_log(message: str):
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open("logs.txt", "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {message}\n")
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CACHED RESOURCES  (built once per process, survive Streamlit reruns)
+# CACHED RESOURCES
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_resource(show_spinner="Cargando modelo de embeddings…")
@@ -88,28 +111,36 @@ def load_embedding_model():
 
 
 def load_all_documents() -> list:
-    """Load PDFs + CSV, tagging each chunk with source metadata."""
+    """Load PDFs and CSV, tagging each document with source metadata."""
     documents = []
 
     pdf_folder = "documentos_hotel"
     if os.path.exists(pdf_folder):
         for file in sorted(os.listdir(pdf_folder)):
             if file.endswith(".pdf"):
-                loader = PyMuPDFLoader(os.path.join(pdf_folder, file))
-                docs = loader.load()
-                for doc in docs:
-                    doc.metadata["source_type"] = "manual"
-                    doc.metadata["filename"]    = file
-                documents.extend(docs)
+                try:
+                    loader = PyMuPDFLoader(os.path.join(pdf_folder, file))
+                    docs = loader.load()
+                    for doc in docs:
+                        doc.metadata["source_type"] = "manual"
+                        doc.metadata["filename"]    = file
+                    documents.extend(docs)
+                    write_log(f"Loaded PDF: {file} ({len(docs)} pages)")
+                except Exception as e:
+                    write_log(f"Error loading {file}: {e}")
 
     csv_path = os.path.join("dades_hotel", "clients.csv")
     if os.path.exists(csv_path):
-        loader = CSVLoader(file_path=csv_path, encoding="utf-8")
-        docs = loader.load()
-        for doc in docs:
-            doc.metadata["source_type"] = "client_data"
-            doc.metadata["filename"]    = "clients.csv"
-        documents.extend(docs)
+        try:
+            loader = CSVLoader(file_path=csv_path, encoding="utf-8")
+            docs = loader.load()
+            for doc in docs:
+                doc.metadata["source_type"] = "client_data"
+                doc.metadata["filename"]    = "clients.csv"
+            documents.extend(docs)
+            write_log(f"Loaded CSV: {len(docs)} rows")
+        except Exception as e:
+            write_log(f"Error loading clients.csv: {e}")
 
     return documents
 
@@ -117,18 +148,23 @@ def load_all_documents() -> list:
 @st.cache_resource(show_spinner="Indexando base de conocimiento…")
 def load_vector_db(_embedding_model):
     """
-    Fast path  → load persisted Chroma index from disk  (~0.3 s).
-    Slow path  → build from scratch and persist          (~8–12 s first run).
+    Fast path → load persisted Chroma index from disk  (~0.3 s).
+    Slow path → build from scratch and persist          (~8-12 s, first run only).
+
+    To force a full rebuild (e.g. after updating PDFs):
+    delete the .chroma_store/ folder and restart the app.
     """
     if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
+        write_log("Loading persisted Chroma index.")
         return Chroma(
             persist_directory=CHROMA_DIR,
             embedding_function=_embedding_model,
         )
 
+    write_log("Building Chroma index from scratch…")
     documents = load_all_documents()
     if not documents:
-        st.warning("No se encontraron documentos en 'documentos_hotel/' ni 'dades_hotel/'.")
+        write_log("ERROR: No documents found.")
         return None
 
     splitter = RecursiveCharacterTextSplitter(
@@ -138,6 +174,7 @@ def load_vector_db(_embedding_model):
         length_function=len,
     )
     chunks = splitter.split_documents(documents)
+    write_log(f"Split into {len(chunks)} chunks.")
 
     db = Chroma.from_documents(
         documents=chunks,
@@ -145,6 +182,7 @@ def load_vector_db(_embedding_model):
         persist_directory=CHROMA_DIR,
     )
     db.persist()
+    write_log("Chroma index built and persisted.")
     return db
 
 
@@ -157,62 +195,95 @@ def load_ai_client():
 # RAG HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def filter_and_deduplicate(results: list, threshold: float, max_k: int) -> list:
+def retrieve_context(vector_db, query: str) -> list:
     """
-    Prefer chunks below threshold, but always return something.
-    Deduplicates near-identical chunks.
+    1. Fetch top RETRIEVAL_K chunks from Chroma.
+    2. Filter out chunks above RELEVANCE_THRESHOLD (truly unrelated).
+    3. Deduplicate near-identical chunks.
+    4. Safety net: if everything was filtered, return the top-3 anyway
+       so the LLM can decide relevance itself.
     """
-    # Prefer relevant chunks, but never return empty
-    relevant = [(doc, score) for doc, score in results if score < threshold]
-    if not relevant:
-        relevant = results  # use everything rather than nothing
+    results = vector_db.similarity_search_with_score(query, k=RETRIEVAL_K)
 
-    seen, deduplicated = set(), []
-    for doc, score in relevant[:max_k]:
+    seen, filtered = set(), []
+    for doc, score in results:
+        if score > RELEVANCE_THRESHOLD:
+            continue
         key = doc.page_content[:80]
         if key not in seen:
             seen.add(key)
-            deduplicated.append((doc, score))
+            filtered.append((doc, score))
+        if len(filtered) >= MAX_CONTEXT_CHUNKS:
+            break
 
-    return deduplicated
+    # Safety net — never send empty context to the LLM
+    if not filtered:
+        seen2 = set()
+        for doc, score in results[:3]:
+            key = doc.page_content[:80]
+            if key not in seen2:
+                seen2.add(key)
+                filtered.append((doc, score))
 
-
-def is_context_sufficient(chunks_with_scores: list, threshold: float) -> bool:
-    """Only block if retrieval returned nothing at all."""
-    return len(chunks_with_scores) > 0
+    return filtered
 
 
 def format_context(chunks_with_scores: list) -> str:
-    """
-    Structure context blocks so the model can distinguish sources.
-    Each block is labelled and separated by a visual divider.
-    """
+    """Structure retrieved chunks so the model can distinguish sources."""
     parts = []
-    for i, (doc, score) in enumerate(chunks_with_scores, 1):
+    for i, (doc, _score) in enumerate(chunks_with_scores, 1):
         source = doc.metadata.get("filename", "hotel data")
         parts.append(f"[Source {i} — {source}]\n{doc.page_content.strip()}")
     return "\n\n---\n\n".join(parts)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STREAMING
+# LLM CALL
 # ══════════════════════════════════════════════════════════════════════════════
 
-def stream_parser(response):
-    """Yield text chunks from a Gemini streaming response, skipping empty ones."""
-    for chunk in response:
-        if chunk.text:
-            yield chunk.text
+def call_gemini(ai_client, prompt: str, placeholder) -> str | None:
+    """
+    Tries streaming first (live token-by-token effect).
+    On failure retries up to MAX_RETRIES times, then falls back to a single
+    non-streaming call. Uses st.empty() placeholder — no st.write_stream,
+    which can cause Streamlit connection drops on long responses.
+    Returns the full response text or None on total failure.
+    """
+    # ── Streaming attempts ────────────────────────────────────────────────────
+    for attempt in range(MAX_RETRIES):
+        full_text = ""
+        try:
+            response = ai_client.models.generate_content_stream(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            for chunk in response:
+                if chunk.text:
+                    full_text += chunk.text
+                    # ▌ cursor makes it feel live without using write_stream
+                    placeholder.markdown(full_text + "▌")
+            placeholder.markdown(full_text)  # final render, remove cursor
+            return full_text
 
+        except Exception as e:
+            write_log(f"Streaming attempt {attempt + 1} error: {e}")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(1.5)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LOGGING
-# ══════════════════════════════════════════════════════════════════════════════
-
-def write_log(message: str):
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open("logs.txt", "a", encoding="utf-8") as f:
-        f.write(f"[{ts}] {message}\n")
+    # ── Non-streaming fallback ────────────────────────────────────────────────
+    write_log("All streaming attempts failed — falling back to non-streaming.")
+    try:
+        response  = ai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        full_text = response.text or ""
+        placeholder.markdown(full_text)
+        return full_text
+    except Exception as e:
+        write_log(f"Non-streaming fallback failed: {e}")
+        placeholder.error("Error de conexión. Por favor, inténtelo de nuevo en unos instantes.")
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -220,66 +291,40 @@ def write_log(message: str):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
-    """
-    Full RAG + LLM pipeline for one conversational turn.
-    Returns the assistant's full response text, or None on error.
-    """
     write_log(f"Query: {pregunta}")
 
-    # ── Retrieval ─────────────────────────────────────────────────────────────
-    with st.spinner("Consultando los registros del hotel…"):
-        raw_results = vector_db.similarity_search_with_score(pregunta, k=RETRIEVAL_K)
-        # 👇 ADD THIS — remove after tuning
-        st.write({doc.page_content[:60]: round(score, 4) for doc, score in raw_results[:5]})
-        relevant    = filter_and_deduplicate(raw_results, RELEVANCE_THRESHOLD, MAX_CONTEXT_CHUNKS)
+    # Retrieval (spinner is subtle — just a small indicator, no jarring text)
+    with st.spinner(""):
+        chunks = retrieve_context(vector_db, pregunta)
 
-    # ── Insufficient context guard ────────────────────────────────────────────
-    if not is_context_sufficient(relevant, RELEVANCE_THRESHOLD):
-        msg = (
-            "Mis disculpas, no encuentro esa información en mis registros. "
-            "Nuestro equipo en recepción estará encantado de ayudarle con cualquier consulta."
-        )
-        st.markdown(msg)
-        write_log(f"Fallback (no relevant context). Best score: "
-                  f"{min(s for _,s in raw_results):.3f}" if raw_results else "no results")
-        return msg
-
-    # ── Build prompt ──────────────────────────────────────────────────────────
-    prompt = SYSTEM_PROMPT.format(
-        context=format_context(relevant),
-        question=pregunta,
+    write_log(
+        f"Retrieved {len(chunks)} chunks | "
+        f"scores: {[round(s, 3) for _, s in chunks]}"
     )
 
-    # ── Generate & stream ─────────────────────────────────────────────────────
-    try:
-        response   = ai_client.models.generate_content_stream(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        full_text  = st.write_stream(stream_parser(response))
-        write_log(f"Response ({len(full_text)} chars): {full_text[:120]}…")
-        return full_text
+    prompt    = SYSTEM_PROMPT.format(
+        context=format_context(chunks),
+        question=pregunta,
+    )
+    placeholder = st.empty()
+    full_text   = call_gemini(ai_client, prompt, placeholder)
 
-    except Exception as e:
-        write_log(f"ERROR: {e}")
-        st.error("Error de conexión. Por favor, inténtelo de nuevo.")
-        return None
+    if full_text:
+        write_log(f"Response ({len(full_text)} chars): {full_text[:150]}")
+
+    return full_text
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # UI
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Time-aware greeting
 hora = datetime.datetime.now().hour
-if 6 <= hora < 14:
-    saludo, icono = "Buenos días",   "☀️"
-elif 14 <= hora < 20:
-    saludo, icono = "Buenas tardes", "🌤️"
-else:
-    saludo, icono = "Buenas noches", "🌙"
+if   6  <= hora < 14: saludo, icono = "Buenos días",   "☀️"
+elif 14 <= hora < 20: saludo, icono = "Buenas tardes", "🌤️"
+else:                  saludo, icono = "Buenas noches",  "🌙"
 
-# Sidebar
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ✨ Hotel Ducado")
     st.caption("Asistente virtual")
@@ -288,29 +333,33 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
     st.divider()
-    st.caption("Lumi está disponible 24h para atender sus consultas.")
+    st.caption("Lumi está disponible 24 h para atender sus consultas.")
 
-# Load resources
+# ── Load resources ────────────────────────────────────────────────────────────
 embedding_model = load_embedding_model()
 vector_db       = load_vector_db(embedding_model)
 ai_client       = load_ai_client()
 
 if vector_db is None:
-    st.error("No se han encontrado documentos del hotel. "
-             "Asegúrate de que las carpetas 'documentos_hotel/' y 'dades_hotel/' existen.")
+    st.error(
+        "No se han encontrado documentos. "
+        "Comprueba que las carpetas 'documentos_hotel/' y 'dades_hotel/' "
+        "existen y contienen archivos, luego reinicia la aplicación."
+    )
     st.stop()
 
-# Session state
+# ── Session state ─────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Welcome screen (only shown before first message)
+# ── Welcome screen (only shown before first message) ─────────────────────────
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top:18vh; margin-bottom:20vh; text-align:center;'>
             <h2 style='font-family:"Lora",serif; font-weight:400; font-size:2.6rem;
                        color:var(--text-color); letter-spacing:-0.5px;'>
-                <span style='font-size:2.2rem; vertical-align:middle; margin-right:12px;'>{icono}</span>
+                <span style='font-size:2.2rem; vertical-align:middle;
+                             margin-right:12px;'>{icono}</span>
                 {saludo}, soy Lumi
             </h2>
             <p style='font-family:"Inter",sans-serif; font-size:1.1rem;
@@ -322,19 +371,18 @@ if len(st.session_state.messages) == 0:
 
 AVATARS = {"user": "👤", "assistant": "✨"}
 
-# Render conversation history
+# ── Render conversation history ───────────────────────────────────────────────
 for message in st.session_state.messages:
     with st.chat_message(message["role"], avatar=AVATARS[message["role"]]):
         st.markdown(message["content"])
 
-# Chat input
+# ── Chat input ────────────────────────────────────────────────────────────────
 if pregunta := st.chat_input("Escribe tu consulta aquí…"):
-    # Show user message immediately
+
     st.session_state.messages.append({"role": "user", "content": pregunta})
     with st.chat_message("user", avatar="👤"):
         st.markdown(pregunta)
 
-    # Generate and stream assistant response
     with st.chat_message("assistant", avatar="✨"):
         result = handle_user_message(pregunta, vector_db, ai_client)
 
