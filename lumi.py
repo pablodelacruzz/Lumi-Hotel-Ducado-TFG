@@ -1,216 +1,169 @@
 import os
-import time
 import datetime
 import warnings
 import logging
 import streamlit as st
 from google import genai
-from google.genai.types import GenerateContentConfig
-from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader, CSVLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
-# ─────────────────────────────────────────────
-# CLEAN LOGS
-# ─────────────────────────────────────────────
+# treure Warnings de terminal
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
-CHROMA_DIR = ".chroma_store"
-RETRIEVAL_K = 6
+st.set_page_config(page_title="Lumi - Hotel Ducado", page_icon="✨", layout="centered")
 
-# ─────────────────────────────────────────────
-# LANGUAGE DETECTION
-# ─────────────────────────────────────────────
-def detect_language(text: str) -> str:
-    text = text.lower()
+# Disseny web 
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    .block-container {
+        padding-top: 3rem;
+        padding-bottom: 5rem;
+    }
+    
+    .stChatInputContainer {
+        border-radius: 16px;
+        border: 1px solid #444; 
+        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    if any("\u4e00" <= c <= "\u9fff" for c in text):
-        return "zh"
-    if any("\u3040" <= c <= "\u30ff" for c in text):
-        return "ja"
-    if any("\uac00" <= c <= "\ud7af" for c in text):
-        return "ko"
-    if any(w in text for w in ["què", "servei", "habitació"]):
-        return "ca"
-    if any(w in text for w in ["qué", "servicio", "habitación"]):
-        return "es"
 
-    return "en"
-
-# ─────────────────────────────────────────────
-# TRANSLATE TO ENGLISH (FOR RETRIEVAL)
-# ─────────────────────────────────────────────
-def translate_to_english(ai_client, text: str) -> str:
-    try:
-        response = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"Translate to English (only translation): {text}",
-            config={"temperature": 0}
-        )
-        return response.text.strip()
-    except:
-        return text
-
-# ─────────────────────────────────────────────
-# SYSTEM PROMPT (STRICT LANGUAGE CONTROL)
-# ─────────────────────────────────────────────
-SYSTEM_INSTRUCTION = """\
-You are Lumi, virtual concierge of Hotel Ducado.
-
-CRITICAL RULE:
-You MUST ALWAYS respond in the exact same language as the guest message.
-
-- Catalan → Catalan
-- Spanish → Spanish
-- English → English
-- Chinese → Chinese
-- ANY language → same language
-
-The hotel context may be in English or Spanish.
-IGNORE its language. Use it only as knowledge.
-
-If answer is not found → apologize briefly and suggest reception.
-
-Style:
-Elegant, warm, concise. Max 3 paragraphs.
-"""
-
-USER_TEMPLATE = """\
-LANGUAGE: {lang}
-
-HOTEL CONTEXT:
-{context}
-
-GUEST MESSAGE:
-{question}
-"""
-
-# ─────────────────────────────────────────────
-# LOAD EMBEDDINGS
-# ─────────────────────────────────────────────
 @st.cache_resource
-def load_embeddings():
-    return HuggingFaceEmbeddings(
-        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-        encode_kwargs={"normalize_embeddings": True},
-        model_kwargs={"device": "cpu"},
-    )
-
-# ─────────────────────────────────────────────
-# LOAD VECTOR DB
-# ─────────────────────────────────────────────
-@st.cache_resource
-def load_db(embeddings):
-    if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
-        return Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
-
+def iniciar_sistema():
+    # Llegim la clau des dels "secrets" de Streamlit en lloc de posar-la al codi
+    API_KEY = st.secrets["GEMINI_API_KEY"] 
+    ai_client = genai.Client(api_key=API_KEY)
+    
     documents = []
-    for file in os.listdir("documentos_hotel"):
-        if file.endswith(".pdf"):
-            loader = PyMuPDFLoader(os.path.join("documentos_hotel", file))
-            documents.extend(loader.load())
+    
+    pdf_folder = "documentos_hotel"
+    if os.path.exists(pdf_folder):
+        for file in os.listdir(pdf_folder):
+            if file.endswith(".pdf"):
+                loader = PyMuPDFLoader(os.path.join(pdf_folder, file))
+                documents.extend(loader.load())
+                
+    csv_path = os.path.join("dades_hotel", "clients.csv")
+    if os.path.exists(csv_path):
+        loader = CSVLoader(file_path=csv_path, encoding="utf-8")
+        documents.extend(loader.load())
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=700,
-        chunk_overlap=100
-    )
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = splitter.split_documents(documents)
 
-    db = Chroma.from_documents(chunks, embeddings, persist_directory=CHROMA_DIR)
-    db.persist()
-    return db
-
-# ─────────────────────────────────────────────
-# RETRIEVAL (MULTI QUERY)
-# ─────────────────────────────────────────────
-def retrieve_context(db, question, ai_client):
-    queries = [question]
-
-    en = translate_to_english(ai_client, question)
-    if en != question:
-        queries.append(en)
-
-    all_chunks = []
-    for q in queries:
-        results = db.similarity_search(q, k=RETRIEVAL_K)
-        all_chunks.extend(results)
-
-    # deduplicate
-    seen = set()
-    final = []
-    for doc in all_chunks:
-        key = doc.page_content[:100]
-        if key not in seen:
-            seen.add(key)
-            final.append(doc)
-
-    return final[:6]
-
-# ─────────────────────────────────────────────
-# FORMAT CONTEXT
-# ─────────────────────────────────────────────
-def format_context(chunks):
-    return "\n\n---\n\n".join([c.page_content for c in chunks])
-
-# ─────────────────────────────────────────────
-# CALL GEMINI
-# ─────────────────────────────────────────────
-def call_gemini(client, prompt, placeholder):
-    config = GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
-
-    full = ""
-    response = client.models.generate_content_stream(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=config,
+    embedding_model = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        encode_kwargs={'normalize_embeddings': True}
     )
+    db = Chroma.from_documents(documents=chunks, embedding=embedding_model) 
+    
+    return db, ai_client
 
+vector_db, model = iniciar_sistema()
+
+def write_log(message):
+    with open("logs.txt", "a", encoding="utf-8") as f:
+        f.write(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {message}\n")
+
+def stream_parser(response):
     for chunk in response:
-        if chunk.text:
-            full += chunk.text
-            placeholder.markdown(full + "▌")
+        yield chunk.text
 
-    placeholder.markdown(full)
-    return full
+# Estètica depenent de l'hora
+hora_actual =  datetime.datetime.now().hour #23 #16
 
-# ─────────────────────────────────────────────
-# STREAMLIT UI
-# ─────────────────────────────────────────────
-st.set_page_config(page_title="Lumi", page_icon="✨")
+if 6 <= hora_actual < 14:
+    saludo = "Buenos días"
+    icono_tiempo = "☀️"
+elif 14 <= hora_actual < 20:
+    saludo = "Buenas tardes"
+    icono_tiempo = "🌤️"
+else:
+    saludo = "Buenas noches"
+    icono_tiempo = "🌙"
 
-embeddings = load_embeddings()
-db = load_db(embeddings)
-client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-
+# interfície del xat
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# variació lletra benvinguda, mode clar o obscur
+if len(st.session_state.messages) == 0:
+    st.markdown(f"""
+        <div style='margin-top: 18vh; margin-bottom: 20vh; text-align: center;'>
+            <h2 style='font-family: "Lora", serif; font-weight: 400; font-size: 2.6rem; color: var(--text-color); letter-spacing: -0.5px;'>
+                <span style='font-size: 2.2rem; vertical-align: middle; margin-right: 12px;'>{icono_tiempo}</span>{saludo}, soy Lumi
+            </h2>
+            <p style='font-family: "Inter", sans-serif; font-size: 1.1rem; color: var(--text-color); opacity: 0.7; margin-top: -10px;'>¿En qué puedo ayudarle hoy?</p>
+        </div>
+    """, unsafe_allow_html=True)
 
-if pregunta := st.chat_input("Ask something..."):
 
+avatars = {"user": "👤", "assistant": "✨"}
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
+        st.markdown(message["content"])
+
+# lógica resposta IA
+pregunta = st.chat_input("Escribe tu consulta aquí...")
+
+if pregunta:
     st.session_state.messages.append({"role": "user", "content": pregunta})
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(pregunta)
+        
+    write_log(f"Consulta: {pregunta}")
 
-    lang = detect_language(pregunta)
+    results = vector_db.similarity_search_with_score(pregunta, k=3) 
+    context_recuperat = [doc.page_content for doc, score in results]
+    
+    with st.chat_message("assistant", avatar="✨"):
+        if not context_recuperat:
+            resposta_buida = "Mis disculpas, no encuentro esta información en mis registros. Por favor, consulte con nuestro equipo en la recepción física para que puedan ayudarle."
+            st.markdown(resposta_buida)
+            st.session_state.messages.append({"role": "assistant", "content": resposta_buida})
+        else:
+            context_text = "\n".join(context_recuperat)
+            prompt_final = f"""Ets la Lumi, la recepcionista virtual de l'Hotel Ducado. 
+La teva missió és atendre els hostes amb la màxima amabilitat, calidesa i empatia, com si fossis la recepcionista d'un hotel de 5 estrelles o un assistent virtual Premium.
 
-    chunks = retrieve_context(db, pregunta, client)
+INSTRUCCIONS:
+1. Respon SEMPRE en l'idioma i el to en què el client et pregunti.
+2. Fes servir NOMÉS la informació que et dono aquí sota (prové dels manuals i del csv de clients).
+3. Elabora respostes amables, directes i elegants. No et repeteixis a cada frase.
+4. Si no saps la resposta amb aquesta informació, disculpa't amablement.
 
-    prompt = USER_TEMPLATE.format(
-        context=format_context(chunks),
-        question=pregunta,
-        lang=lang
-    )
+INFORMACIÓ DEL SISTEMA:
+{context_text}
 
-    with st.chat_message("assistant"):
-        placeholder = st.empty()
-        respuesta = call_gemini(client, prompt, placeholder)
-
-    st.session_state.messages.append({"role": "assistant", "content": respuesta})
+PREGUNTA DEL CLIENT:
+{pregunta}"""
+            
+            try:
+                response = model.models.generate_content_stream(
+                    model='gemini-2.5-flash',
+                    contents=prompt_final
+                )
+                text_complet = st.write_stream(stream_parser(response))
+                
+                st.session_state.messages.append({"role": "assistant", "content": text_complet})
+                write_log(f"Resposta: {text_complet}")
+            except Exception as e:
+                st.error("Error de conexión. Por favor, inténtelo de nuevo.")
+                write_log(f"ERROR: {e}")
