@@ -8,3 +8,5 @@ chromadb
 pymupdf
 sentence-transformers
 protobuf<5.0.0
+torch
+torchvision
