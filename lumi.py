@@ -92,11 +92,14 @@ def log_analytics(room: str, question: str, response_text: str):
     lang = "Desconegut"
     category = "Desconeguda"
     
-    # Extreure metadades del comentari HTML ocult
-    match = re.search(r'', response_text, re.IGNORECASE)
-    if match:
-        lang = match.group(1).strip()
-        category = match.group(2).strip()
+    try:
+        # Busquem el comentari ocult amb expressió regular (ara més flexible)
+        match = re.search(r'', response_text, re.IGNORECASE)
+        if match and len(match.groups()) >= 2:
+            lang = match.group(1).strip()
+            category = match.group(2).strip()
+    except Exception as e:
+        write_log(f"Error parsejant metadades: {e}")
         
     linia_log = f"[{ts}] | Habitació: {room} | Idioma: {lang} | Categoria: {category} | Pregunta: {question}\n"
     
