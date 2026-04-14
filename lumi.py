@@ -34,7 +34,6 @@ ROOM_TOKENS = {
 }
 
 # ── Instruccions de Sistema (Prompt Engineering) ──────────────────────────────
-# ARREGLAT: Hem tornat a posar la plantilla HTML exacta perquè Gemini sàpiga com fer-ho.
 SYSTEM_INSTRUCTION = """\
 You are Lumi, the virtual concierge of Hotel Ducado, a luxury 5-star hotel.
 CRITICAL RULES:
@@ -96,7 +95,7 @@ def log_analytics(room: str, question: str, response_text: str):
     category = "Desconeguda"
     
     try:
-        # ARREGLAT: Hem tornat a posar l'expressió regular completa!
+        # Busquem el comentari ocult amb expressió regular
         match = re.search(r'', response_text, re.IGNORECASE)
         if match and len(match.groups()) >= 2:
             lang = match.group(1).strip()
@@ -308,14 +307,13 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
         log_analytics(current_room, pregunta, result)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PANELL D'ADMINISTRACIÓ (NOMÉS PER A LA REUNIÓ AMB L'HÈCTOR)
+# PANELL D'ADMINISTRACIÓ (AL MIG DE LA PANTALLA, IMPOSSIBLE DE PERDRE)
 # ══════════════════════════════════════════════════════════════════════════════
-with st.sidebar:
-    st.markdown("### 📊 Panell de Control (Tech)")
-    st.caption(f"📍 Habitació detectada: **{current_room}**")
-    st.divider()
-    
+st.divider() # Posa una línia separadora sota el xat
+with st.expander("🛠️ Panell de Control per a l'Hèctor (Clica aquí per obrir)", expanded=False):
+    st.caption(f"📍 Habitació detectada (via URL): **{current_room}**")
     st.markdown("#### Registre de Consultes (Text Pla)")
+    
     if st.button("🔄 Refrescar Registre"):
         try:
             with open("log_consultes.txt", "r", encoding="utf-8") as f:
@@ -323,6 +321,6 @@ with st.sidebar:
             if contingut_log.strip() == "":
                 st.info("L'arxiu de registre existeix, però està buit.")
             else:
-                st.text_area("Contingut de 'log_consultes.txt':", value=contingut_log, height=400)
+                st.text_area("Contingut de l'arxiu 'log_consultes.txt':", value=contingut_log, height=300)
         except FileNotFoundError:
-            st.warning("L'arxiu encara no s'ha creat. Fes una pregunta al xat per generar-lo.")
+            st.warning("L'arxiu de log encara no s'ha creat. Fes una pregunta al xat primer.")
