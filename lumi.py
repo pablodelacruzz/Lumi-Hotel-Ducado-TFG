@@ -27,7 +27,6 @@ RETRIEVAL_K    = 4
 MAX_RETRIES    = 2      
 
 # Diccionari de Seguretat per a les habitacions (Tokens)
-# Evita que l'usuari pugui canviar el número d'habitació manualment a la URL
 ROOM_TOKENS = {
     "tk_a1b2c": "Hab_201",
     "tk_x9y8z": "Hab_202",
@@ -35,6 +34,7 @@ ROOM_TOKENS = {
 }
 
 # ── Instruccions de Sistema (Prompt Engineering) ──────────────────────────────
+# ARREGLAT: Hem tornat a posar la plantilla HTML exacta perquè Gemini sàpiga com fer-ho.
 SYSTEM_INSTRUCTION = """\
 You are Lumi, the virtual concierge of Hotel Ducado, a luxury 5-star hotel.
 CRITICAL RULES:
@@ -42,7 +42,10 @@ CRITICAL RULES:
 2. Answer ONLY using the hotel information provided in the user message. Do not invent details or prices.
 3. If the information does not contain the answer, apologize politely and suggest the guest contact the physical reception desk.
 4. Tone: Be exceptionally warm, empathetic, and elegant. Act like a high-end concierge. Elaborate slightly to sound conversational and helpful, but do not exceed 3 paragraphs. Never repeat the guest's question.
-5. METADATA: You MUST start your response exactly with this hidden HTML comment: After the HTML comment, start a new line and write your response to the guest."""
+5. MANDATORY METADATA: You MUST start your response with an exact HTML comment containing the language and category.
+EXAMPLE FORMAT: Replace "ES" with the 2-letter code of the user's language. 
+Replace "MENJAR" with the most fitting category: MENJAR, SERVEIS, HORARIS, NORMES, PROBLEMA, ALTRES.
+After the HTML comment, start a new line and write your natural response to the guest."""
 
 USER_TEMPLATE = """\
 HOTEL INFORMATION:
@@ -93,7 +96,7 @@ def log_analytics(room: str, question: str, response_text: str):
     category = "Desconeguda"
     
     try:
-        # Busquem el comentari ocult amb expressió regular (ara més flexible)
+        # ARREGLAT: Hem tornat a posar l'expressió regular completa!
         match = re.search(r'', response_text, re.IGNORECASE)
         if match and len(match.groups()) >= 2:
             lang = match.group(1).strip()
