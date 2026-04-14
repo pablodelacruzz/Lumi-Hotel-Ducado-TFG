@@ -303,3 +303,23 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
         st.session_state.messages.append({"role": "assistant", "content": result})
         # Registrar dades de negoci
         log_analytics(current_room, pregunta, result)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PANELL D'ADMINISTRACIÓ (NOMÉS PER A LA REUNIÓ AMB L'HÈCTOR)
+# ══════════════════════════════════════════════════════════════════════════════
+with st.sidebar:
+    st.markdown("### 📊 Panell de Control (Tech)")
+    st.caption(f"📍 Habitació detectada: **{current_room}**")
+    st.divider()
+    
+    st.markdown("#### Registre de Consultes (Text Pla)")
+    if st.button("🔄 Refrescar Registre"):
+        try:
+            with open("log_consultes.txt", "r", encoding="utf-8") as f:
+                contingut_log = f.read()
+            if contingut_log.strip() == "":
+                st.info("L'arxiu de registre existeix, però està buit.")
+            else:
+                st.text_area("Contingut de 'log_consultes.txt':", value=contingut_log, height=400)
+        except FileNotFoundError:
+            st.warning("L'arxiu encara no s'ha creat. Fes una pregunta al xat per generar-lo.")
