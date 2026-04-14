@@ -95,18 +95,19 @@ def log_analytics(room: str, question: str, response_text: str):
     category = "Desconeguda"
     
     try:
-        # Busquem el comentari ocult amb expressió regular
-        match = re.search(r'', response_text, re.IGNORECASE)
-        if match and len(match.groups()) >= 2:
-            lang = match.group(1).strip()
-            category = match.group(2).strip()
+        # NOVA ESTRATÈGIA: Cerca a prova de bombes.
+        # Busquem independentment qualsevol cosa que vingui després de LANG: i CATEGORY:
+        match_lang = re.search(r'LANG:\s*([A-Za-z]{2})', response_text, re.IGNORECASE)
+        match_cat  = re.search(r'CATEGORY:\s*([A-Za-zÀ-ÿ]+)', response_text, re.IGNORECASE)
+        
+        if match_lang:
+            lang = match_lang.group(1).upper()
+        if match_cat:
+            category = match_cat.group(1).upper()
     except Exception as e:
         write_log(f"Error parsejant metadades: {e}")
         
     linia_log = f"[{ts}] | Habitació: {room} | Idioma: {lang} | Categoria: {category} | Pregunta: {question}\n"
-    
-    # També ho traiem per consola perquè es vegi al "Manage App" de Streamlit Cloud
-    print(linia_log)
         
     try:
         with open("log_consultes.txt", "a", encoding="utf-8") as f:
