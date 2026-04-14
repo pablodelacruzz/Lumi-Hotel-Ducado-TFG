@@ -3,38 +3,47 @@ import time
 import datetime
 import warnings
 import logging
+import re   # Per extreure les dades ocultes de la resposta (metadades)
 import streamlit as st
 from google import genai
-from google.genai.types import GenerateContentConfig  # Ús correcte de l'API de Gemini
+from google.genai.types import GenerateContentConfig
 from langchain_community.document_loaders import PyMuPDFLoader, CSVLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
-# ── Treure Warnings de terminal ───────────────────────────────────────────────
+# ── Configuració de seguretat i silenci de warnings ──────────────────────────
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CONSTANTS I CONFIGURACIÓ RAG
+# CONSTANTS I CONFIGURACIÓ DEL SISTEMA
 # ══════════════════════════════════════════════════════════════════════════════
 
-CHROMA_DIR     = ".chroma_store"
-RETRIEVAL_K    = 4      # Portem els 4 millors fragments (com que ara són més grans, 4 és ideal)
-MAX_RETRIES    = 2      # Intents de streaming abans de fer fallback
+CHROMA_DIR     = ".chroma_store_v2" 
+RETRIEVAL_K    = 4      
+MAX_RETRIES    = 2      
 
-# ── Instruccions de Sistema (L'ànima de la Lumi) ──────────────────────────────
+# Diccionari de Seguretat per a les habitacions (Tokens)
+# Evita que l'usuari pugui canviar el número d'habitació manualment a la URL
+ROOM_TOKENS = {
+    "tk_a1b2c": "Hab_201",
+    "tk_x9y8z": "Hab_202",
+    "tk_m4n5p": "Hab_203"
+}
+
+# ── Instruccions de Sistema (Prompt Engineering) ──────────────────────────────
 SYSTEM_INSTRUCTION = """\
 You are Lumi, the virtual concierge of Hotel Ducado, a luxury 5-star hotel.
 CRITICAL RULES:
 1. Always reply in the EXACT same language the guest uses. No exceptions.
 2. Answer ONLY using the hotel information provided in the user message. Do not invent details or prices.
 3. If the information does not contain the answer, apologize politely and suggest the guest contact the physical reception desk.
-4. Tone: Be exceptionally warm, empathetic, and elegant. Act like a high-end concierge. Elaborate slightly to sound conversational and helpful, but do not exceed 3 paragraphs. Never repeat the guest's question."""
+4. Tone: Be exceptionally warm, empathetic, and elegant. Act like a high-end concierge. Elaborate slightly to sound conversational and helpful, but do not exceed 3 paragraphs. Never repeat the guest's question.
+5. METADATA: You MUST start your response exactly with this hidden HTML comment: After the HTML comment, start a new line and write your response to the guest."""
 
-# ── Plantilla de l'usuari (Aquí van les dades del RAG) ────────────────────────
 USER_TEMPLATE = """\
 HOTEL INFORMATION:
 {context}
@@ -43,7 +52,7 @@ GUEST MESSAGE:
 {question}"""
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CONFIGURACIÓ DE LA PÀGINA I DISSENY (ESTIL APPLE)
+# DISSENY I ESTIL (INTERFÍCIE APPLE)
 # ══════════════════════════════════════════════════════════════════════════════
 
 st.set_page_config(page_title="Lumi — Hotel Ducado", page_icon="✨", layout="centered")
@@ -65,7 +74,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# FUNCIONS BÀSIQUES I CACHE
+# LOGS I ANALÍTICA
 # ══════════════════════════════════════════════════════════════════════════════
 
 def write_log(message: str):
@@ -76,7 +85,35 @@ def write_log(message: str):
     except Exception:
         pass
 
-@st.cache_resource(show_spinner="Carregant model d'intel·ligència...")
+def log_analytics(room: str, question: str, response_text: str):
+    """Guarda un registre de text pla per a l'anàlisi de negoci."""
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    lang = "Desconegut"
+    category = "Desconeguda"
+    
+    # Extreure metadades del comentari HTML ocult
+    match = re.search(r'', response_text, re.IGNORECASE)
+    if match:
+        lang = match.group(1).strip()
+        category = match.group(2).strip()
+        
+    linia_log = f"[{ts}] | Habitació: {room} | Idioma: {lang} | Categoria: {category} | Pregunta: {question}\n"
+    
+    # També ho traiem per consola perquè es vegi al "Manage App" de Streamlit Cloud
+    print(linia_log)
+        
+    try:
+        with open("log_consultes.txt", "a", encoding="utf-8") as f:
+            f.write(linia_log)
+    except Exception as e:
+        write_log(f"Error guardant log_consultes: {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LÒGICA RAG (EMBEDDINGS I VECTOR DB)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_resource(show_spinner="Preparant intel·ligència...")
 def load_embedding_model():
     return HuggingFaceEmbeddings(
         model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -97,7 +134,6 @@ def load_all_documents() -> list:
                         doc.metadata["source_type"] = "manual"
                         doc.metadata["filename"]    = file
                     documents.extend(docs)
-                    write_log(f"PDF Carregat: {file} ({len(docs)} pàgines)")
                 except Exception as e:
                     write_log(f"Error carregant {file}: {e}")
 
@@ -110,23 +146,19 @@ def load_all_documents() -> list:
                 doc.metadata["source_type"] = "client_data"
                 doc.metadata["filename"]    = "clients.csv"
             documents.extend(docs)
-        except Exception as e:
-            write_log(f"Error carregant clients.csv: {e}")
-
+        except Exception:
+            pass
     return documents
 
-@st.cache_resource(show_spinner="Indexant la base de coneixement...")
+@st.cache_resource(show_spinner="Indexant manuals de l'hotel...")
 def load_vector_db(_embedding_model):
     if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
-        write_log("Carregant base de dades Chroma existent.")
         return Chroma(persist_directory=CHROMA_DIR, embedding_function=_embedding_model)
 
-    write_log("Creant base de dades Chroma des de zero...")
     documents = load_all_documents()
     if not documents:
         return None
 
-    # TALLAT DE TEXT OPTIMITZAT: Fragments més grans per no perdre context (ex: Planxa)
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1024,  
         chunk_overlap=128, 
@@ -136,7 +168,6 @@ def load_vector_db(_embedding_model):
     chunks = splitter.split_documents(documents)
     
     db = Chroma.from_documents(documents=chunks, embedding=_embedding_model, persist_directory=CHROMA_DIR)
-    write_log("Base de dades creada i guardada.")
     return db
 
 @st.cache_resource(show_spinner=False)
@@ -161,7 +192,7 @@ def format_context(chunks_with_scores: list) -> str:
     return "\n\n---\n\n".join(parts)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TRUCADA A GEMINI (AMB PROTECCIÓ ANTI-CRASH)
+# GENERACIÓ DE RESPOSTA (GEMINI)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
@@ -181,12 +212,10 @@ def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
                     placeholder.markdown(full_text + "▌")
             placeholder.markdown(full_text)
             return full_text
-        except Exception as e:
-            write_log(f"Error de streaming (intent {attempt + 1}): {e}")
+        except Exception:
             if attempt < MAX_RETRIES - 1:
                 time.sleep(1.5)
 
-    write_log("Intentant mètode sense streaming (fallback)...")
     try:
         response  = ai_client.models.generate_content(
             model="gemini-2.5-flash",
@@ -196,12 +225,11 @@ def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
         full_text = response.text or ""
         placeholder.markdown(full_text)
         return full_text
-    except Exception as e:
-        placeholder.error(f"Error de connexió: {e}")
+    except Exception:
+        placeholder.error("Error de connexió.")
         return None
 
 def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
-    write_log(f"Consulta: {pregunta}")
     with st.spinner("Pensant..."):
         chunks = retrieve_context(vector_db, pregunta)
     
@@ -213,25 +241,33 @@ def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
     return call_gemini(ai_client, user_content, placeholder)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# INTERFÍCIE D'USUARI (FRONT-END)
+# EXECUCIÓ PRINCIPAL (APP)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# 1. Identificació de l'habitació via URL
+query_params = st.query_params
+url_token = query_params.get("key", "default")
+current_room = ROOM_TOKENS.get(url_token, "Recepció / General")
+
+# 2. Salutació segons l'hora
 hora = datetime.datetime.now().hour
 if   6  <= hora < 14: saludo, icono = "Buenos días",   "☀️"
 elif 14 <= hora < 20: saludo, icono = "Buenas tardes", "🌤️"
 else:                 saludo, icono = "Buenas noches", "🌙"
 
+# 3. Càrrega de recursos
 embedding_model = load_embedding_model()
 vector_db       = load_vector_db(embedding_model)
 ai_client       = load_ai_client()
 
 if vector_db is None:
-    st.error("No s'han trobat documents a la carpeta 'documentos_hotel/'.")
+    st.error("No s'han trobat documents.")
     st.stop()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# 4. Pantalla de benvinguda
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top:18vh; margin-bottom:20vh; text-align:center;'>
@@ -246,10 +282,12 @@ if len(st.session_state.messages) == 0:
 
 AVATARS = {"user": "👤", "assistant": "✨"}
 
+# Mostrar historial
 for message in st.session_state.messages:
     with st.chat_message(message["role"], avatar=AVATARS[message["role"]]):
         st.markdown(message["content"])
 
+# 5. Entrada de l'usuari
 if pregunta := st.chat_input("Escribe tu consulta aquí..."):
     st.session_state.messages.append({"role": "user", "content": pregunta})
     with st.chat_message("user", avatar="👤"):
@@ -260,3 +298,5 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
 
     if result:
         st.session_state.messages.append({"role": "assistant", "content": result})
+        # Registrar dades de negoci
+        log_analytics(current_room, pregunta, result)
