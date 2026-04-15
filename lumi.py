@@ -12,29 +12,112 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
-# ── Configuració de seguretat i silenci de warnings ──────────────────────────
+# Treure Warnings
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONSTANTS I CONFIGURACIÓ DEL SISTEMA
-# ══════════════════════════════════════════════════════════════════════════════
-
+# CONSTANTS I CONFIG
 CHROMA_DIR     = ".chroma_store_v2" 
 RETRIEVAL_K    = 4      
 MAX_RETRIES    = 2      
 
-# Diccionari de Seguretat per a les habitacions
+# Codi habitacions URL 
 ROOM_TOKENS = {
-    "tk_a1b2c": "Hab_201",
-    "tk_x9y8z": "Hab_202",
-    "tk_m4n5p": "Hab_203"
+    # P1
+    "tk_1q2w3": "Hab_101",
+    "tk_4e5r6": "Hab_102",
+    "tk_7t8y9": "Hab_103",
+    "tk_0u1i2": "Hab_104",
+    "tk_3o4p5": "Hab_105",
+    "tk_6a7s8": "Hab_106",
+    "tk_9d0f1": "Hab_107",
+    "tk_2g3h4": "Hab_108",
+    "tk_5j6k7": "Hab_109",
+    "tk_8l9z0": "Hab_110",
+    "tk_1x2c3": "Hab_111",
+
+    # P2
+    "tk_a1b2c": "Hab_201",  
+    "tk_x9y8z": "Hab_202",  
+    "tk_m4n5p": "Hab_203", 
+    "tk_v4b5n": "Hab_204",
+    "tk_m6q7w": "Hab_205",
+    "tk_e8r9t": "Hab_206",
+    "tk_y1u2i": "Hab_207",
+    "tk_o3p4a": "Hab_208",
+    "tk_s5d6f": "Hab_209",
+    "tk_g7h8j": "Hab_210",
+    "tk_k9l1z": "Hab_211",
+
+    # P3
+    "tk_x2c3v": "Hab_301",
+    "tk_b4n5m": "Hab_302",
+    "tk_q6w7e": "Hab_303",
+    "tk_r8t9y": "Hab_304",
+    "tk_u1i2o": "Hab_305",
+    "tk_p3a4s": "Hab_306",
+    "tk_d5f6g": "Hab_307",
+    "tk_h7j8k": "Hab_308",
+    "tk_l9z1x": "Hab_309",
+    "tk_c2v3b": "Hab_310",
+    "tk_n4m5q": "Hab_311",
+
+    # P4
+    "tk_w1e2r": "Hab_401",
+    "tk_t3y4u": "Hab_402",
+    "tk_i5o6p": "Hab_403",
+    "tk_a7s8d": "Hab_404",
+    "tk_f9g1h": "Hab_405",
+    "tk_j2k3l": "Hab_406",
+    "tk_z4x5c": "Hab_407",
+    "tk_v6b7n": "Hab_408",
+    "tk_m8q9w": "Hab_409",
+    "tk_e1r2t": "Hab_410",
+    "tk_y3u4i": "Hab_411",
+
+    # P5
+    "tk_o5p6a": "Hab_501",
+    "tk_s7d8f": "Hab_502",
+    "tk_g9h1j": "Hab_503",
+    "tk_k2l3z": "Hab_504",
+    "tk_x4c5v": "Hab_505",
+    "tk_b6n7m": "Hab_506",
+    "tk_q8w9e": "Hab_507",
+    "tk_r1t2y": "Hab_508",
+    "tk_u3i4o": "Hab_509",
+    "tk_p5a6s": "Hab_510",
+    "tk_d7f8g": "Hab_511",
+
+    # P6
+    "tk_h9j1k": "Hab_601",
+    "tk_l2z3x": "Hab_602",
+    "tk_c4v5b": "Hab_603",
+    "tk_n6m7q": "Hab_604",
+    "tk_w8e9r": "Hab_605",
+    "tk_t1y2u": "Hab_606",
+    "tk_i3o4p": "Hab_607",
+    "tk_a5s6d": "Hab_608",
+    "tk_f7g8h": "Hab_609",
+    "tk_j9k1l": "Hab_610",
+    "tk_z2x3c": "Hab_611",
+
+    # P7
+    "tk_v4b9n": "Hab_701",
+    "tk_m6q2w": "Hab_702",
+    "tk_e8r4t": "Hab_703",
+    "tk_y1u6i": "Hab_704",
+    "tk_o3p8a": "Hab_707",
+    "tk_s5d0f": "Hab_708",
+    "tk_g7h2j": "Hab_710",
+    "tk_k9l4z": "Hab_711",
+
+    # SUITE PRESIDENCIAL
+    "tk_suite8": "Hab_801"
 }
 
-# ── Instruccions de Sistema (Prompt Engineering) ──────────────────────────────
-# FORMAT INFAL·LIBLE: Posem les dades al final entre ||
+# PROMPT GEMINI (NO TOCAR!)
 SYSTEM_INSTRUCTION = """\
 You are Lumi, the virtual concierge of Hotel Ducado, a luxury 5-star hotel.
 CRITICAL RULES:
@@ -54,10 +137,8 @@ HOTEL INFORMATION:
 GUEST MESSAGE:
 {question}"""
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DISSENY I ESTIL (INTERFÍCIE APPLE)
-# ══════════════════════════════════════════════════════════════════════════════
 
+# DISSENY WEB
 st.set_page_config(page_title="Lumi — Hotel Ducado", page_icon="✨", layout="centered")
 
 st.markdown("""
@@ -76,10 +157,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LOGS I ANALÍTICA
-# ══════════════════════════════════════════════════════════════════════════════
 
+
+# ESCRIURE LOGS AL .txt
 def write_log(message: str):
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -94,7 +174,7 @@ def log_analytics(room: str, question: str, response_text: str):
     category = "Desconeguda"
     
     try:
-        # Extraiem el que hi hagi entre els || i || de forma segura
+        # Extrec info entre || i ||: util
         match = re.search(r'\|\|(.*?)\|\|', response_text)
         if match:
             dades = match.group(1).split(',')
@@ -112,10 +192,9 @@ def log_analytics(room: str, question: str, response_text: str):
     except Exception as e:
         pass
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LÒGICA RAG
-# ══════════════════════════════════════════════════════════════════════════════
 
+
+# RAG INICIAL BASE EL QUE VAM PROGRAMAR A LA FASE 1, AMB AJUDA DE huggingFace
 @st.cache_resource(show_spinner="Preparant intel·ligència...")
 def load_embedding_model():
     return HuggingFaceEmbeddings(
@@ -171,10 +250,9 @@ def format_context(chunks_with_scores: list) -> str:
         parts.append(f"[Fragment {i}]\n{doc.page_content.strip()}")
     return "\n\n---\n\n".join(parts)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GENERACIÓ DE RESPOSTA (GEMINI)
-# ══════════════════════════════════════════════════════════════════════════════
 
+
+# GENERATOR A GEMINI (GEMINI 2.5 FLASH)
 def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
     config = GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
     full_text = ""
@@ -188,7 +266,7 @@ def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
         for chunk in response:
             if chunk.text:
                 full_text += chunk.text
-                # En el mateix instant que Gemini comenci a escriure || s'oculta la resta
+                # En el mateix instant que Gemini comenci a escriure || s'oculta la resta -> Per no mostrar text al client
                 display_text = full_text.split("||")[0].strip()
                 placeholder.markdown(display_text + "▌")
                 
@@ -196,7 +274,7 @@ def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
         display_text = full_text.split("||")[0].strip()
         placeholder.markdown(display_text)
         
-        return full_text # Retornem el text brutal amb els || per extreure al log
+        return full_text # Retornem el text amb els || per extreure al log
     except Exception:
         placeholder.error("Error de connexió amb Gemini.")
         return None
@@ -209,14 +287,15 @@ def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
     placeholder = st.empty()
     return call_gemini(ai_client, user_content, placeholder)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EXECUCIÓ PRINCIPAL (APP)
-# ══════════════════════════════════════════════════════════════════════════════
 
+
+
+
+# EXECUCIÓ PRINCIPAL (APP)
 query_params = st.query_params
 url_token = query_params.get("key", "default")
 
-# 🔴 PANELL SECRET (NOMÉS ADMIN)
+# PANELL DMIN HOTEL
 is_admin = (url_token == "admin")
 current_room = "Administració" if is_admin else ROOM_TOKENS.get(url_token, "Recepció / General")
 
@@ -270,13 +349,11 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
         st.session_state.messages.append({"role": "assistant", "content": result})
         log_analytics(current_room, pregunta, result)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PANELL SECRET (NOMÉS VISIBLE AMB LA URL CORRECTA)
-# ══════════════════════════════════════════════════════════════════════════════
+# PANELL PER L'HOTEL /// ADMIN PANEL
 if is_admin:
     st.write("---")
-    st.markdown("### 🔐 Panell Secret de Gestió (BI Hotel Ducado)")
-    st.caption("Aquest panell només és visible per a la Direcció a través d'un enllaç segur.")
+    st.markdown("### 🔒 Business Intelligence Hotel ")
+    st.caption("Aquest panell només és visible per a direcció a través d'un enllaç segur.")
     if os.path.exists("log_consultes.txt"):
         with open("log_consultes.txt", "r", encoding="utf-8") as f:
             log_data = f.read()
