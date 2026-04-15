@@ -26,7 +26,7 @@ CHROMA_DIR     = ".chroma_store_v2"
 RETRIEVAL_K    = 4      
 MAX_RETRIES    = 2      
 
-# Diccionari de Seguretat per a les habitacions (Tokens)
+# Diccionari de Seguretat per a les habitacions
 ROOM_TOKENS = {
     "tk_a1b2c": "Hab_201",
     "tk_x9y8z": "Hab_202",
@@ -40,11 +40,10 @@ CRITICAL RULES:
 1. Always reply in the EXACT same language the guest uses. No exceptions.
 2. Answer ONLY using the hotel information provided in the user message. Do not invent details or prices.
 3. If the information does not contain the answer, apologize politely and suggest the guest contact the physical reception desk.
-4. Tone: Be exceptionally warm, empathetic, and elegant. Act like a high-end concierge. Elaborate slightly to sound conversational and helpful, but do not exceed 3 paragraphs. Never repeat the guest's question.
-5. MANDATORY METADATA: You MUST start your response with an exact HTML comment containing the language and category.
-EXAMPLE FORMAT: Replace "ES" with the 2-letter code of the user's language. 
-Replace "MENJAR" with the most fitting category: MENJAR, SERVEIS, HORARIS, NORMES, PROBLEMA, ALTRES.
-After the HTML comment, start a new line and write your natural response to the guest."""
+4. Tone: Be exceptionally warm, empathetic, and elegant. Max 3 paragraphs.
+5. METADATA (CRITICAL): You MUST start your response with a hidden HTML comment containing the language code and category.
+FORMAT EXACTLY LIKE THIS: Categories allowed: MENJAR, SERVEIS, HORARIS, NORMES, PROBLEMA, ALTRES.
+After the HTML comment, start a new line and write your response."""
 
 USER_TEMPLATE = """\
 HOTEL INFORMATION:
@@ -88,22 +87,15 @@ def write_log(message: str):
         pass
 
 def log_analytics(room: str, question: str, response_text: str):
-    """Guarda un registre de text pla per a l'anàlisi de negoci."""
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
     lang = "Desconegut"
     category = "Desconeguda"
     
     try:
-        # NOVA ESTRATÈGIA: Cerca a prova de bombes.
-        # Busquem independentment qualsevol cosa que vingui després de LANG: i CATEGORY:
-        match_lang = re.search(r'LANG:\s*([A-Za-z]{2})', response_text, re.IGNORECASE)
-        match_cat  = re.search(r'CATEGORY:\s*([A-Za-zÀ-ÿ]+)', response_text, re.IGNORECASE)
-        
-        if match_lang:
-            lang = match_lang.group(1).upper()
-        if match_cat:
-            category = match_cat.group(1).upper()
+        # Cerca senzilla per capturar match = re.search(r'', response_text)
+        if match:
+            lang = match.group(1).strip().upper()
+            category = match.group(2).strip().upper()
     except Exception as e:
         write_log(f"Error parsejant metadades: {e}")
         
@@ -116,7 +108,7 @@ def log_analytics(room: str, question: str, response_text: str):
         write_log(f"Error guardant log_consultes: {e}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LÒGICA RAG (EMBEDDINGS I VECTOR DB)
+# LÒGICA RAG
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_resource(show_spinner="Preparant intel·ligència...")
@@ -136,24 +128,9 @@ def load_all_documents() -> list:
                 try:
                     loader = PyMuPDFLoader(os.path.join(pdf_folder, file))
                     docs = loader.load()
-                    for doc in docs:
-                        doc.metadata["source_type"] = "manual"
-                        doc.metadata["filename"]    = file
                     documents.extend(docs)
-                except Exception as e:
-                    write_log(f"Error carregant {file}: {e}")
-
-    csv_path = os.path.join("dades_hotel", "clients.csv")
-    if os.path.exists(csv_path):
-        try:
-            loader = CSVLoader(file_path=csv_path, encoding="utf-8")
-            docs = loader.load()
-            for doc in docs:
-                doc.metadata["source_type"] = "client_data"
-                doc.metadata["filename"]    = "clients.csv"
-            documents.extend(docs)
-        except Exception:
-            pass
+                except Exception:
+                    pass
     return documents
 
 @st.cache_resource(show_spinner="Indexant manuals de l'hotel...")
@@ -165,16 +142,9 @@ def load_vector_db(_embedding_model):
     if not documents:
         return None
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1024,  
-        chunk_overlap=128, 
-        separators=["\n\n", "\n", ". ", ", ", " "],
-        length_function=len,
-    )
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=128)
     chunks = splitter.split_documents(documents)
-    
-    db = Chroma.from_documents(documents=chunks, embedding=_embedding_model, persist_directory=CHROMA_DIR)
-    return db
+    return Chroma.from_documents(documents=chunks, embedding=_embedding_model, persist_directory=CHROMA_DIR)
 
 @st.cache_resource(show_spinner=False)
 def load_ai_client():
@@ -193,8 +163,7 @@ def retrieve_context(vector_db, query: str) -> list:
 def format_context(chunks_with_scores: list) -> str:
     parts = []
     for i, (doc, _score) in enumerate(chunks_with_scores, 1):
-        source = doc.metadata.get("filename", "hotel data")
-        parts.append(f"[Source {i} — {source}]\n{doc.page_content.strip()}")
+        parts.append(f"[Fragment {i}]\n{doc.page_content.strip()}")
     return "\n\n---\n\n".join(parts)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -203,46 +172,33 @@ def format_context(chunks_with_scores: list) -> str:
 
 def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
     config = GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
-
-    for attempt in range(MAX_RETRIES):
-        full_text = ""
-        try:
-            response = ai_client.models.generate_content_stream(
-                model="gemini-2.5-flash",
-                contents=user_content,
-                config=config,
-            )
-            for chunk in response:
-                if chunk.text:
-                    full_text += chunk.text
-                    placeholder.markdown(full_text + "▌")
-            placeholder.markdown(full_text)
-            return full_text
-        except Exception:
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(1.5)
-
+    full_text = ""
+    
     try:
-        response  = ai_client.models.generate_content(
+        response = ai_client.models.generate_content_stream(
             model="gemini-2.5-flash",
             contents=user_content,
             config=config,
         )
-        full_text = response.text or ""
-        placeholder.markdown(full_text)
-        return full_text
+        for chunk in response:
+            if chunk.text:
+                full_text += chunk.text
+                # Netejem l'HTML ocult de la pantalla en temps real perquè no es vegi
+                display_text = re.sub(r'', '', full_text, flags=re.DOTALL).strip()
+                placeholder.markdown(display_text + "▌")
+                
+        display_text = re.sub(r'', '', full_text, flags=re.DOTALL).strip()
+        placeholder.markdown(display_text)
+        return full_text # Retornem el text sencer (amb HTML) perquè es guardi al log
     except Exception:
-        placeholder.error("Error de connexió.")
+        placeholder.error("Error de connexió amb Gemini.")
         return None
 
 def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
     with st.spinner("Pensant..."):
         chunks = retrieve_context(vector_db, pregunta)
     
-    user_content = USER_TEMPLATE.format(
-        context=format_context(chunks),
-        question=pregunta,
-    )
+    user_content = USER_TEMPLATE.format(context=format_context(chunks), question=pregunta)
     placeholder = st.empty()
     return call_gemini(ai_client, user_content, placeholder)
 
@@ -250,18 +206,15 @@ def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
 # EXECUCIÓ PRINCIPAL (APP)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# 1. Identificació de l'habitació via URL
 query_params = st.query_params
 url_token = query_params.get("key", "default")
 current_room = ROOM_TOKENS.get(url_token, "Recepció / General")
 
-# 2. Salutació segons l'hora
 hora = datetime.datetime.now().hour
 if   6  <= hora < 14: saludo, icono = "Buenos días",   "☀️"
 elif 14 <= hora < 20: saludo, icono = "Buenas tardes", "🌤️"
 else:                 saludo, icono = "Buenas noches", "🌙"
 
-# 3. Càrrega de recursos
 embedding_model = load_embedding_model()
 vector_db       = load_vector_db(embedding_model)
 ai_client       = load_ai_client()
@@ -273,7 +226,10 @@ if vector_db is None:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 4. Pantalla de benvinguda
+# Netejar l'HTML ocult també de l'historial del xat
+def clean_message(text):
+    return re.sub(r'', '', text, flags=re.DOTALL).strip()
+
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
         <div style='margin-top:18vh; margin-bottom:20vh; text-align:center;'>
@@ -288,12 +244,10 @@ if len(st.session_state.messages) == 0:
 
 AVATARS = {"user": "👤", "assistant": "✨"}
 
-# Mostrar historial
 for message in st.session_state.messages:
     with st.chat_message(message["role"], avatar=AVATARS[message["role"]]):
-        st.markdown(message["content"])
+        st.markdown(clean_message(message["content"]))
 
-# 5. Entrada de l'usuari
 if pregunta := st.chat_input("Escribe tu consulta aquí..."):
     st.session_state.messages.append({"role": "user", "content": pregunta})
     with st.chat_message("user", avatar="👤"):
@@ -304,24 +258,21 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
 
     if result:
         st.session_state.messages.append({"role": "assistant", "content": result})
-        # Registrar dades de negoci
         log_analytics(current_room, pregunta, result)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PANELL D'ADMINISTRACIÓ (AL MIG DE LA PANTALLA, IMPOSSIBLE DE PERDRE)
+# DESCÀRREGA DE LOGS (ESTIL MVP/ESTUDIANT)
 # ══════════════════════════════════════════════════════════════════════════════
-st.divider() # Posa una línia separadora sota el xat
-with st.expander("🛠️ Panell de Control per a l'Hèctor (Clica aquí per obrir)", expanded=False):
-    st.caption(f"📍 Habitació detectada (via URL): **{current_room}**")
-    st.markdown("#### Registre de Consultes (Text Pla)")
+st.write("---")
+if os.path.exists("log_consultes.txt"):
+    with open("log_consultes.txt", "r", encoding="utf-8") as f:
+        log_data = f.read()
     
-    if st.button("🔄 Refrescar Registre"):
-        try:
-            with open("log_consultes.txt", "r", encoding="utf-8") as f:
-                contingut_log = f.read()
-            if contingut_log.strip() == "":
-                st.info("L'arxiu de registre existeix, però està buit.")
-            else:
-                st.text_area("Contingut de l'arxiu 'log_consultes.txt':", value=contingut_log, height=300)
-        except FileNotFoundError:
-            st.warning("L'arxiu de log encara no s'ha creat. Fes una pregunta al xat primer.")
+    st.download_button(
+        label="📥 Descarregar Log de Consultes (.txt)",
+        data=log_data,
+        file_name="log_consultes.txt",
+        mime="text/plain"
+    )
+else:
+    st.caption("El fitxer de logs encara no s'ha generat.")
