@@ -3,7 +3,7 @@ import time
 import datetime
 import warnings
 import logging
-import re   # Per extreure les dades ocultes de la resposta (metadades)
+import re
 import streamlit as st
 from google import genai
 from google.genai.types import GenerateContentConfig
@@ -34,6 +34,7 @@ ROOM_TOKENS = {
 }
 
 # ── Instruccions de Sistema (Prompt Engineering) ──────────────────────────────
+# FORMAT INFAL·LIBLE: Posem les dades al final entre ||
 SYSTEM_INSTRUCTION = """\
 You are Lumi, the virtual concierge of Hotel Ducado, a luxury 5-star hotel.
 CRITICAL RULES:
@@ -41,9 +42,10 @@ CRITICAL RULES:
 2. Answer ONLY using the hotel information provided in the user message. Do not invent details or prices.
 3. If the information does not contain the answer, apologize politely and suggest the guest contact the physical reception desk.
 4. Tone: Be exceptionally warm, empathetic, and elegant. Max 3 paragraphs.
-5. METADATA (CRITICAL): You MUST start your response with a hidden HTML comment containing the language code and category.
-FORMAT EXACTLY LIKE THIS: Categories allowed: MENJAR, SERVEIS, HORARIS, NORMES, PROBLEMA, ALTRES.
-After the HTML comment, start a new line and write your response."""
+5. METADATA (CRITICAL): At the VERY END of your entire response, you MUST append the language and category wrapped in double pipes.
+FORMAT EXACTLY LIKE THIS: ||ES, MENJAR||
+Language codes: ES, EN, CA, FR, DE...
+Categories allowed: MENJAR, SERVEIS, HORARIS, NORMES, PROBLEMA, ALTRES."""
 
 USER_TEMPLATE = """\
 HOTEL INFORMATION:
@@ -92,37 +94,15 @@ def log_analytics(room: str, question: str, response_text: str):
     category = "Desconeguda"
     
     try:
-        # Extraiem TOT el que hi hagi dins del comentari HTML (sigui quin sigui el format)
-        match = re.search(r'', response_text, re.DOTALL)
+        # Extraiem el que hi hagi entre els || i || de forma segura
+        match = re.search(r'\|\|(.*?)\|\|', response_text)
         if match:
-            contingut_ocult = match.group(1).upper() # Ho passem tot a majúscules
-            
-            # 1. CAÇAR LA CATEGORIA
-            categories_possibles = ["MENJAR", "SERVEIS", "HORARIS", "NORMES", "PROBLEMA", "ALTRES"]
-            for cat in categories_possibles:
-                if cat in contingut_ocult:
-                    category = cat
-                    break # Si la troba, para de buscar
-                    
-            # 2. CAÇAR L'IDIOMA
-            if "EN" in contingut_ocult or "ENGLISH" in contingut_ocult:
-                lang = "EN"
-            elif "ES" in contingut_ocult or "SPANISH" in contingut_ocult or "CASTELLANO" in contingut_ocult:
-                lang = "ES"
-            elif "CA" in contingut_ocult or "CATALAN" in contingut_ocult:
-                lang = "CA"
-            elif "FR" in contingut_ocult or "FRENCH" in contingut_ocult:
-                lang = "FR"
-            elif "DE" in contingut_ocult or "GERMAN" in contingut_ocult:
-                lang = "DE"
-            else:
-                # Si escriu un altre idioma, agafem les primeres dues lletres que hi hagi
-                lletres = re.findall(r'[A-Z]{2}', contingut_ocult)
-                if lletres:
-                    lang = lletres[0]
-                    
+            dades = match.group(1).split(',')
+            if len(dades) >= 2:
+                lang = dades[0].strip().upper()
+                category = dades[1].strip().upper()
     except Exception as e:
-        write_log(f"Error parsejant metadades: {e}")
+        pass
         
     linia_log = f"[{ts}] | Habitació: {room} | Idioma: {lang} | Categoria: {category} | Pregunta: {question}\n"
         
@@ -208,13 +188,15 @@ def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
         for chunk in response:
             if chunk.text:
                 full_text += chunk.text
-                # Netejem l'HTML ocult de la pantalla en temps real perquè no es vegi
-                display_text = re.sub(r'', '', full_text, flags=re.DOTALL).strip()
+                # En el mateix instant que Gemini comenci a escriure || s'oculta la resta
+                display_text = full_text.split("||")[0].strip()
                 placeholder.markdown(display_text + "▌")
                 
-        display_text = re.sub(r'', '', full_text, flags=re.DOTALL).strip()
+        # Resultat final net
+        display_text = full_text.split("||")[0].strip()
         placeholder.markdown(display_text)
-        return full_text # Retornem el text sencer (amb HTML) perquè es guardi al log
+        
+        return full_text # Retornem el text brutal amb els || per extreure al log
     except Exception:
         placeholder.error("Error de connexió amb Gemini.")
         return None
@@ -233,7 +215,10 @@ def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
 
 query_params = st.query_params
 url_token = query_params.get("key", "default")
-current_room = ROOM_TOKENS.get(url_token, "Recepció / General")
+
+# 🔴 PANELL SECRET (NOMÉS ADMIN)
+is_admin = (url_token == "admin")
+current_room = "Administració" if is_admin else ROOM_TOKENS.get(url_token, "Recepció / General")
 
 hora = datetime.datetime.now().hour
 if   6  <= hora < 14: saludo, icono = "Buenos días",   "☀️"
@@ -251,9 +236,9 @@ if vector_db is None:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Netejar l'HTML ocult també de l'historial del xat
+# Netejar l'historial del xat perquè l'usuari no vegi mai els ||
 def clean_message(text):
-    return re.sub(r'', '', text, flags=re.DOTALL).strip()
+    return text.split("||")[0].strip()
 
 if len(st.session_state.messages) == 0:
     st.markdown(f"""
@@ -286,18 +271,21 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
         log_analytics(current_room, pregunta, result)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DESCÀRREGA DE LOGS (ESTIL MVP/ESTUDIANT)
+# PANELL SECRET (NOMÉS VISIBLE AMB LA URL CORRECTA)
 # ══════════════════════════════════════════════════════════════════════════════
-st.write("---")
-if os.path.exists("log_consultes.txt"):
-    with open("log_consultes.txt", "r", encoding="utf-8") as f:
-        log_data = f.read()
-    
-    st.download_button(
-        label="📥 Descarregar Log de Consultes (.txt)",
-        data=log_data,
-        file_name="log_consultes.txt",
-        mime="text/plain"
-    )
-else:
-    st.caption("El fitxer de logs encara no s'ha generat.")
+if is_admin:
+    st.write("---")
+    st.markdown("### 🔐 Panell Secret de Gestió (BI Hotel Ducado)")
+    st.caption("Aquest panell només és visible per a la Direcció a través d'un enllaç segur.")
+    if os.path.exists("log_consultes.txt"):
+        with open("log_consultes.txt", "r", encoding="utf-8") as f:
+            log_data = f.read()
+        
+        st.download_button(
+            label="📥 Descarregar Log de Consultes Totes les Habitacions (.txt)",
+            data=log_data,
+            file_name="log_consultes.txt",
+            mime="text/plain"
+        )
+    else:
+        st.info("Encara no hi ha dades al registre. Fes una consulta per generar-les.")
