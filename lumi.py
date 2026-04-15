@@ -92,10 +92,35 @@ def log_analytics(room: str, question: str, response_text: str):
     category = "Desconeguda"
     
     try:
-        # Cerca senzilla per capturar match = re.search(r'', response_text)
+        # Extraiem TOT el que hi hagi dins del comentari HTML (sigui quin sigui el format)
+        match = re.search(r'', response_text, re.DOTALL)
         if match:
-            lang = match.group(1).strip().upper()
-            category = match.group(2).strip().upper()
+            contingut_ocult = match.group(1).upper() # Ho passem tot a majúscules
+            
+            # 1. CAÇAR LA CATEGORIA
+            categories_possibles = ["MENJAR", "SERVEIS", "HORARIS", "NORMES", "PROBLEMA", "ALTRES"]
+            for cat in categories_possibles:
+                if cat in contingut_ocult:
+                    category = cat
+                    break # Si la troba, para de buscar
+                    
+            # 2. CAÇAR L'IDIOMA
+            if "EN" in contingut_ocult or "ENGLISH" in contingut_ocult:
+                lang = "EN"
+            elif "ES" in contingut_ocult or "SPANISH" in contingut_ocult or "CASTELLANO" in contingut_ocult:
+                lang = "ES"
+            elif "CA" in contingut_ocult or "CATALAN" in contingut_ocult:
+                lang = "CA"
+            elif "FR" in contingut_ocult or "FRENCH" in contingut_ocult:
+                lang = "FR"
+            elif "DE" in contingut_ocult or "GERMAN" in contingut_ocult:
+                lang = "DE"
+            else:
+                # Si escriu un altre idioma, agafem les primeres dues lletres que hi hagi
+                lletres = re.findall(r'[A-Z]{2}', contingut_ocult)
+                if lletres:
+                    lang = lletres[0]
+                    
     except Exception as e:
         write_log(f"Error parsejant metadades: {e}")
         
@@ -105,7 +130,7 @@ def log_analytics(room: str, question: str, response_text: str):
         with open("log_consultes.txt", "a", encoding="utf-8") as f:
             f.write(linia_log)
     except Exception as e:
-        write_log(f"Error guardant log_consultes: {e}")
+        pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LÒGICA RAG
