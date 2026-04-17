@@ -349,7 +349,7 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
         st.session_state.messages.append({"role": "assistant", "content": result})
         log_analytics(current_room, pregunta, result)
 
-# PANELL PER L'HOTEL /// ADMIN PANEL + DASHBORD
+# PANELL PER L'HOTEL /// ADMIN PANEL
 if is_admin:
     import pandas as pd
     import plotly.express as px
@@ -358,61 +358,109 @@ if is_admin:
     st.markdown("### 🔒 Business Intelligence Hotel ")
     st.caption("Aquest panell només és visible per a direcció a través d'un enllaç segur.")
 
-    # dashboard
+    # --- 1. DASHBOARD ANALÍTIC (MÈTRIQUES AVANÇADES) ---
     if os.path.exists("log_consultes.txt"):
         raw_logs = []
         with open("log_consultes.txt", "r", encoding="utf-8") as f:
             for line in f:
                 parts = line.split(" | ")
                 if len(parts) >= 4:
-                    raw_logs.append({
-                        "Data": parts[0].replace("[", "").replace("]", ""),
-                        "Habitació": parts[1].split(": ")[1],
-                        "Idioma": parts[2].split(": ")[1],
-                        "Categoria": parts[3].split(": ")[1]
-                    })
-        
+                    try:
+                        # Extraiem de forma segura segons el teu format
+                        data_str = parts[0].replace("[", "").replace("]", "").strip()
+                        hab = parts[1].split(": ")[1].strip()
+                        idioma = parts[2].split(": ")[1].strip()
+                        cat = parts[3].split(": ")[1].strip()
+                        preg = parts[4].split(": ", 1)[1].strip() if len(parts) > 4 else ""
+                        
+                        raw_logs.append({
+                            "Data": data_str,
+                            "Habitació": hab,
+                            "Idioma": idioma,
+                            "Categoria": cat,
+                            "Pregunta": preg
+                        })
+                    except Exception:
+                        pass # Ignorem línies mal formades
+
         df = pd.DataFrame(raw_logs)
 
         if not df.empty:
-            # Key metrics
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total Consultes", len(df))
-            upselling_count = len(df[df["Categoria"].isin(["MENJAR", "SERVEIS"])])
-            m2.metric("Oportunitats d'Upselling", f"{upselling_count} 💰")
-            m3.metric("Idiomes detectats", df["Idioma"].nunique())
+            # Convertim la data per treure'n l'hora (per a operacions)
+            df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+            df['Hora'] = df['Data'].dt.hour
 
-            # Gràfics
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.markdown("#### 🌍 Idiomes")
-                fig_pie = px.pie(df, names="Idioma", hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel)
-                st.plotly_chart(fig_pie, use_container_width=True)
+            # --- KPIs DE VENDES I OPERACIONS ---
+            st.markdown("#### 📊 KPIs de Negoci")
+            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
             
-            with col_b:
-                st.markdown("#### 📊 Categories (Upselling)")
-                cat_data = df["Categoria"].value_counts().reset_index()
-                cat_data.columns = ["Categoria", "Total"]
-                fig_bar = px.bar(cat_data, x="Total", y="Categoria", orientation='h', color="Categoria", color_discrete_sequence=px.colors.qualitative.Safe)
-                st.plotly_chart(fig_bar, use_container_width=True)
+            total_consultes = len(df)
+            upsell_df = df[df["Categoria"].isin(["MENJAR", "SERVEIS"])]
+            problemes_df = df[df["Categoria"] == "PROBLEMA"]
+            
+            taxa_upsell = (len(upsell_df) / total_consultes) * 100 if total_consultes > 0 else 0
+            
+            kpi1.metric("Interaccions Totals", total_consultes)
+            kpi2.metric("Oportunitats d'Upselling", f"{len(upsell_df)}", f"{taxa_upsell:.1f}% del total")
+            kpi3.metric("Alertes (Problemes)", len(problemes_df), "Risc Reputacional", delta_color="inverse")
+            kpi4.metric("Idiomes Detectats", df["Idioma"].nunique())
+
+            st.write("---")
+
+            # --- GRÀFICS DE DECISIÓ ---
+            col_chart1, col_chart2 = st.columns([2, 1]) # Gràfic d'hores més ample
+            
+            with col_chart1:
+                st.markdown("**🕒 Volum de Peticions per Franja Horària**")
+                st.caption("Optimització de torns de Recepció i Room Service.")
+                
+                # Comptabilitzem per hores i omplim les hores buides
+                hora_counts = df['Hora'].value_counts().sort_index().reset_index()
+                hora_counts.columns = ['Hora del dia', 'Nombre de Consultes']
+                totes_les_hores = pd.DataFrame({'Hora del dia': range(24)})
+                hora_counts = pd.merge(totes_les_hores, hora_counts, on='Hora del dia', how='left').fillna(0)
+                
+                fig_line = px.area(hora_counts, x='Hora del dia', y='Nombre de Consultes', 
+                                   template="plotly_white", color_discrete_sequence=['#1f77b4'])
+                fig_line.update_xaxes(tickmode='linear', dtick=2)
+                st.plotly_chart(fig_line, use_container_width=True)
+
+            with col_chart2:
+                st.markdown("**💰 Distribució de la Demanda**")
+                st.caption("Focus d'interès dels clients.")
+                
+                fig_donut = px.pie(df, names="Categoria", hole=0.5, 
+                                   color_discrete_sequence=px.colors.qualitative.Pastel)
+                fig_donut.update_traces(textposition='inside', textinfo='percent+label')
+                fig_donut.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                st.plotly_chart(fig_donut, use_container_width=True)
+
+            # --- TAULA D'ALERTES EN DIRECTE ---
+            if not problemes_df.empty:
+                st.markdown("#### 🚨 Registre d'Incidències Crítiques")
+                st.error("S'han detectat interaccions categoritzades com a PROBLEMA. Cal revisió.")
+                st.dataframe(problemes_df[['Data', 'Habitació', 'Idioma', 'Pregunta']].sort_values(by='Data', ascending=False).head(5), use_container_width=True)
+            else:
+                st.success("✨ Cap queixa o incidència reportada recentment.")
+
         else:
             st.info("No hi ha dades suficients per generar els gràfics.")
     else:
         st.info("Encara no hi ha dades al registre. Fes una consulta per començar.")
 
-    st.divider()
+    st.write("---")
 
-    # backups (upload, download)
-    st.markdown("#### 📂 Gestió de Dades i Backups")
+    # --- 2. GESTIÓ DE FITXERS (DESCARREGAR I PUJAR BACKUPS) ---
+    st.markdown("#### 📂 Gestió de Dades")
     col_down, col_up = st.columns(2)
     
     with col_down:
-        st.markdown("**Exportar Dades (Local)**")
+        st.markdown("**Exportar Històric**")
         if os.path.exists("log_consultes.txt"):
             with open("log_consultes.txt", "r", encoding="utf-8") as f:
                 log_data = f.read()
             st.download_button(
-                label="📥 Descarregar Log Totes les Habitacions (.txt)",
+                label="📥 Descarregar Log de Consultes (.txt)",
                 data=log_data,
                 file_name="log_consultes.txt",
                 mime="text/plain"
@@ -421,12 +469,12 @@ if is_admin:
             st.write("No hi ha dades per descarregar.")
 
     with col_up:
-        st.markdown("**Importar Dades (Demo TFG)**")
-        uploaded_file = st.file_uploader("📤 Pujar arxiu de logs històric (.txt)", type=["txt"])
+        st.markdown("**Importar Dades (Demo)**")
+        uploaded_file = st.file_uploader("📤 Pujar arxiu de logs (.txt)", type=["txt"], label_visibility="collapsed")
         if uploaded_file is not None:
-            if st.button("⚠️ Sobreescriure base de dades actual"):
+            if st.button("⚠️ Sobreescriure dades actuals"):
                 with open("log_consultes.txt", "wb") as f:
                     f.write(uploaded_file.getbuffer())
-                st.success("Dades restaurades! Recarregant el Dashboard...")
+                st.success("Base de dades actualitzada! Recarregant el panell...")
                 time.sleep(1.5)
                 st.rerun()
