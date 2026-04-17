@@ -264,7 +264,7 @@ def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
             for chunk in response:
                 if chunk.text:
                     full_text += chunk.text
-                    # Ocultem les metadades || mentre escriu
+                    # Ocultem les dades || mentre escriu
                     display_text = full_text.split("||")[0].strip()
                     placeholder.markdown(display_text + "▌")
             
@@ -351,9 +351,7 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
         log_analytics(current_room, pregunta, result)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PANELL PER L'HOTEL /// ADMIN PANEL (DASHBOARD PREMIUM)
-# ══════════════════════════════════════════════════════════════════════════════
+# PANELL PER L'HOTEL i ADMIN PANEL + DASHBOARD
 if is_admin:
     import pandas as pd
     import plotly.express as px
@@ -362,7 +360,7 @@ if is_admin:
     st.markdown("### 🔒 Business Intelligence Hotel ")
     st.caption("Aquest panell només és visible per a direcció a través d'un enllaç segur.")
 
-    # --- 1. DASHBOARD ANALÍTIC ---
+    # Dashboard
     if os.path.exists("log_consultes.txt"):
         raw_logs = []
         with open("log_consultes.txt", "r", encoding="utf-8") as f:
@@ -392,7 +390,7 @@ if is_admin:
             df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
             df['Hora'] = df['Data'].dt.hour
 
-            # --- KPIs DE VENDES I OPERACIONS ---
+            # KPIs
             st.markdown("#### 📊 KPIs de Negoci")
             kpi1, kpi2, kpi3, kpi4 = st.columns(4)
             
@@ -404,12 +402,12 @@ if is_admin:
             
             kpi1.metric("Interaccions Totals", total_consultes)
             kpi2.metric("Oportunitats Upselling", f"{len(upsell_df)}", f"{taxa_upsell:.1f}% del total")
-            kpi3.metric("Alertes (Problemes)", len(problemes_df), "Risc Reputacional", delta_color="inverse")
+            kpi3.metric("Alertes (Problemes)", len(problemes_df), "Risc", delta_color="inverse")
             kpi4.metric("Idiomes Detectats", df["Idioma"].nunique())
 
             st.write("---")
 
-            # --- GRÀFICS DE DECISIÓ ---
+            # gràfics
             col_chart1, col_chart2 = st.columns([2, 1]) 
             
             with col_chart1:
@@ -427,7 +425,7 @@ if is_admin:
                 st.plotly_chart(fig_line, use_container_width=True)
 
             with col_chart2:
-                st.markdown("**💰 Distribució de la Demanda**")
+                st.markdown("**Distribució de la Demanda**")
                 st.caption("Focus d'interès dels clients.")
                 
                 fig_donut = px.pie(df, names="Categoria", hole=0.5, 
