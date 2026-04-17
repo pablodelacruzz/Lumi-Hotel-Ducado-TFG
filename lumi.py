@@ -21,7 +21,7 @@ logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
 # CONSTANTS I CONFIG
 CHROMA_DIR     = ".chroma_store_v2" 
 RETRIEVAL_K    = 4      
-MAX_RETRIES    = 2      
+MAX_RETRIES    = 3      # HEM PUJAT ELS REINTENTS A 3 PER EVITAR TALLS
 
 # Codi habitacions URL 
 ROOM_TOKENS = {
@@ -158,7 +158,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-
 # ESCRIURE LOGS AL .txt
 def write_log(message: str):
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -174,7 +173,6 @@ def log_analytics(room: str, question: str, response_text: str):
     category = "Desconeguda"
     
     try:
-        # Extrec info entre || i ||: util
         match = re.search(r'\|\|(.*?)\|\|', response_text)
         if match:
             dades = match.group(1).split(',')
@@ -193,8 +191,7 @@ def log_analytics(room: str, question: str, response_text: str):
         pass
 
 
-
-# RAG INICIAL BASE EL QUE VAM PROGRAMAR A LA FASE 1, AMB AJUDA DE huggingFace
+# RAG INICIAL BASE
 @st.cache_resource(show_spinner="Preparant intel·ligència...")
 def load_embedding_model():
     return HuggingFaceEmbeddings(
@@ -251,33 +248,40 @@ def format_context(chunks_with_scores: list) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-
-# GENERATOR A GEMINI (GEMINI 2.5 FLASH)
+# --- GENERATOR A GEMINI (AMB SISTEMA DE REINTENTS ROBUST) ---
 def call_gemini(ai_client, user_content: str, placeholder) -> str | None:
     config = GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
-    full_text = ""
     
-    try:
-        response = ai_client.models.generate_content_stream(
-            model="gemini-2.5-flash",
-            contents=user_content,
-            config=config,
-        )
-        for chunk in response:
-            if chunk.text:
-                full_text += chunk.text
-                # En el mateix instant que Gemini comenci a escriure || s'oculta la resta -> Per no mostrar text al client
-                display_text = full_text.split("||")[0].strip()
-                placeholder.markdown(display_text + "▌")
-                
-        # Resultat final net
-        display_text = full_text.split("||")[0].strip()
-        placeholder.markdown(display_text)
-        
-        return full_text # Retornem el text amb els || per extreure al log
-    except Exception:
-        placeholder.error("Error de connexió amb Gemini.")
-        return None
+    # Bucle de reintents per evitar errors de connexió
+    for attempt in range(MAX_RETRIES):
+        full_text = ""
+        try:
+            response = ai_client.models.generate_content_stream(
+                model="gemini-2.5-flash",
+                contents=user_content,
+                config=config,
+            )
+            for chunk in response:
+                if chunk.text:
+                    full_text += chunk.text
+                    # Ocultem les metadades || mentre escriu
+                    display_text = full_text.split("||")[0].strip()
+                    placeholder.markdown(display_text + "▌")
+            
+            # Resultat final net
+            display_text = full_text.split("||")[0].strip()
+            placeholder.markdown(display_text)
+            
+            return full_text # Retornem el text amb els || per extreure al log
+            
+        except Exception as e:
+            # Si estem en el primer o segon intent, esperem 2 segons i ho tornem a provar
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(2)
+                continue
+            else:
+                placeholder.error("Error de connexió amb Gemini. Si us plau, torna a provar-ho.")
+                return None
 
 def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
     with st.spinner("Pensant..."):
@@ -288,14 +292,11 @@ def handle_user_message(pregunta: str, vector_db, ai_client) -> str | None:
     return call_gemini(ai_client, user_content, placeholder)
 
 
-
-
-
 # EXECUCIÓ PRINCIPAL (APP)
 query_params = st.query_params
 url_token = query_params.get("key", "default")
 
-# PANELL DMIN HOTEL
+# PANELL ADMIN HOTEL
 is_admin = (url_token == "admin")
 current_room = "Administració" if is_admin else ROOM_TOKENS.get(url_token, "Recepció / General")
 
@@ -349,7 +350,10 @@ if pregunta := st.chat_input("Escribe tu consulta aquí..."):
         st.session_state.messages.append({"role": "assistant", "content": result})
         log_analytics(current_room, pregunta, result)
 
-# PANELL PER L'HOTEL /// ADMIN PANEL
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PANELL PER L'HOTEL /// ADMIN PANEL (DASHBOARD PREMIUM)
+# ══════════════════════════════════════════════════════════════════════════════
 if is_admin:
     import pandas as pd
     import plotly.express as px
@@ -358,7 +362,7 @@ if is_admin:
     st.markdown("### 🔒 Business Intelligence Hotel ")
     st.caption("Aquest panell només és visible per a direcció a través d'un enllaç segur.")
 
-    # --- 1. DASHBOARD ANALÍTIC (MÈTRIQUES AVANÇADES) ---
+    # --- 1. DASHBOARD ANALÍTIC ---
     if os.path.exists("log_consultes.txt"):
         raw_logs = []
         with open("log_consultes.txt", "r", encoding="utf-8") as f:
@@ -366,7 +370,6 @@ if is_admin:
                 parts = line.split(" | ")
                 if len(parts) >= 4:
                     try:
-                        # Extraiem de forma segura segons el teu format
                         data_str = parts[0].replace("[", "").replace("]", "").strip()
                         hab = parts[1].split(": ")[1].strip()
                         idioma = parts[2].split(": ")[1].strip()
@@ -381,12 +384,11 @@ if is_admin:
                             "Pregunta": preg
                         })
                     except Exception:
-                        pass # Ignorem línies mal formades
+                        pass 
 
         df = pd.DataFrame(raw_logs)
 
         if not df.empty:
-            # Convertim la data per treure'n l'hora (per a operacions)
             df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
             df['Hora'] = df['Data'].dt.hour
 
@@ -401,20 +403,19 @@ if is_admin:
             taxa_upsell = (len(upsell_df) / total_consultes) * 100 if total_consultes > 0 else 0
             
             kpi1.metric("Interaccions Totals", total_consultes)
-            kpi2.metric("Oportunitats d'Upselling", f"{len(upsell_df)}", f"{taxa_upsell:.1f}% del total")
+            kpi2.metric("Oportunitats Upselling", f"{len(upsell_df)}", f"{taxa_upsell:.1f}% del total")
             kpi3.metric("Alertes (Problemes)", len(problemes_df), "Risc Reputacional", delta_color="inverse")
             kpi4.metric("Idiomes Detectats", df["Idioma"].nunique())
 
             st.write("---")
 
             # --- GRÀFICS DE DECISIÓ ---
-            col_chart1, col_chart2 = st.columns([2, 1]) # Gràfic d'hores més ample
+            col_chart1, col_chart2 = st.columns([2, 1]) 
             
             with col_chart1:
                 st.markdown("**🕒 Volum de Peticions per Franja Horària**")
                 st.caption("Optimització de torns de Recepció i Room Service.")
                 
-                # Comptabilitzem per hores i omplim les hores buides
                 hora_counts = df['Hora'].value_counts().sort_index().reset_index()
                 hora_counts.columns = ['Hora del dia', 'Nombre de Consultes']
                 totes_les_hores = pd.DataFrame({'Hora del dia': range(24)})
