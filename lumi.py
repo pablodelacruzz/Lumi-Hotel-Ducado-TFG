@@ -400,9 +400,9 @@ if is_admin:
             taxa_upsell = (len(upsell_df) / total_consultes) * 100 if total_consultes > 0 else 0
             
             kpi1.metric("Total Consultes", total_consultes)
-            kpi2.metric("Oportunitats d'Upselling", f"{len(upsell_df)} 💰", f"{taxa_upsell:.1f}% del total")
-            kpi3.metric("Idiomes detectats", df["Idioma"].nunique())
-            kpi4.metric("Alertes (Problemes)", len(problemes_df), "Risc Reputacional", delta_color="inverse")
+            kpi2.metric("Idiomes detectats", df["Idioma"].nunique())
+            kpi3.metric("Oportunitats d'Upselling", f"{len(upsell_df)}", f"{taxa_upsell:.1f}% del total")
+            kpi4.metric("Alertes (Problemes)", len(problemes_df), "Risc", delta_color="inverse")
 
             st.write("---")
 
@@ -418,7 +418,7 @@ if is_admin:
                 st.plotly_chart(fig_pie, use_container_width=True)
 
             with col_bar:
-                st.markdown("**📊 Categories (Upselling)**")
+                st.markdown("**📊 Categories**")
                 cat_data = df["Categoria"].value_counts().reset_index()
                 cat_data.columns = ["Categoria", "Total"]
                 fig_bar = px.bar(cat_data, x="Total", y="Categoria", orientation='h', 
@@ -480,7 +480,7 @@ if is_admin:
             st.write("No hi ha dades per descarregar.")
 
     with col_up:
-        st.markdown("**Importar Dades (Demo TFG)**")
+        st.markdown("**Importar Dades (Backups)**")
         uploaded_file = st.file_uploader("📤 Pujar arxiu de logs històric (.txt)", type=["txt"], label_visibility="collapsed")
         if uploaded_file is not None:
             if st.button("⚠️ Sobreescriure dades actuals"):
