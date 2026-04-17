@@ -360,7 +360,6 @@ if is_admin:
     st.markdown("### 🔒 Business Intelligence Hotel ")
     st.caption("Aquest panell només és visible per a direcció a través d'un enllaç segur.")
 
-    # Dashboard
     if os.path.exists("log_consultes.txt"):
         raw_logs = []
         with open("log_consultes.txt", "r", encoding="utf-8") as f:
@@ -400,41 +399,54 @@ if is_admin:
             
             taxa_upsell = (len(upsell_df) / total_consultes) * 100 if total_consultes > 0 else 0
             
-            kpi1.metric("Interaccions Totals", total_consultes)
-            kpi2.metric("Oportunitats Upselling", f"{len(upsell_df)}", f"{taxa_upsell:.1f}% del total")
-            kpi3.metric("Alertes (Problemes)", len(problemes_df), "Risc", delta_color="inverse")
-            kpi4.metric("Idiomes Detectats", df["Idioma"].nunique())
+            kpi1.metric("Total Consultes", total_consultes)
+            kpi2.metric("Oportunitats d'Upselling", f"{len(upsell_df)} 💰", f"{taxa_upsell:.1f}% del total")
+            kpi3.metric("Idiomes detectats", df["Idioma"].nunique())
+            kpi4.metric("Alertes (Problemes)", len(problemes_df), "Risc Reputacional", delta_color="inverse")
 
             st.write("---")
 
-            # gràfics
-            col_chart1, col_chart2 = st.columns([2, 1]) 
+            # C1
+            col_pie, col_bar = st.columns(2)
             
-            with col_chart1:
-                st.markdown("**🕒 Volum de Peticions per Franja Horària**")
-                st.caption("Optimització de torns de Recepció i Room Service.")
-                
-                hora_counts = df['Hora'].value_counts().sort_index().reset_index()
-                hora_counts.columns = ['Hora del dia', 'Nombre de Consultes']
-                totes_les_hores = pd.DataFrame({'Hora del dia': range(24)})
-                hora_counts = pd.merge(totes_les_hores, hora_counts, on='Hora del dia', how='left').fillna(0)
-                
-                fig_line = px.area(hora_counts, x='Hora del dia', y='Nombre de Consultes', 
-                                   template="plotly_white", color_discrete_sequence=['#1f77b4'])
-                fig_line.update_xaxes(tickmode='linear', dtick=2)
-                st.plotly_chart(fig_line, use_container_width=True)
+            with col_pie:
+                st.markdown("**🌍 Idiomes**")
+                fig_pie = px.pie(df, names="Idioma", hole=0.4, 
+                                 color_discrete_sequence=px.colors.qualitative.Pastel)
+                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie.update_layout(showlegend=False, margin=dict(t=20, b=20, l=0, r=0))
+                st.plotly_chart(fig_pie, use_container_width=True)
 
-            with col_chart2:
-                st.markdown("**Distribució de la Demanda**")
-                st.caption("Focus d'interès dels clients.")
-                
-                fig_donut = px.pie(df, names="Categoria", hole=0.5, 
-                                   color_discrete_sequence=px.colors.qualitative.Pastel)
-                fig_donut.update_traces(textposition='inside', textinfo='percent+label')
-                fig_donut.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-                st.plotly_chart(fig_donut, use_container_width=True)
+            with col_bar:
+                st.markdown("**📊 Categories (Upselling)**")
+                cat_data = df["Categoria"].value_counts().reset_index()
+                cat_data.columns = ["Categoria", "Total"]
+                fig_bar = px.bar(cat_data, x="Total", y="Categoria", orientation='h', 
+                                 color="Categoria", color_discrete_sequence=px.colors.qualitative.Safe)
+                fig_bar.update_layout(showlegend=True, margin=dict(t=20, b=20, l=0, r=0), yaxis_title="")
+                st.plotly_chart(fig_bar, use_container_width=True)
 
-            # --- TAULA D'ALERTES EN DIRECTE ---
+            st.write("---")
+
+            # C2
+            st.markdown("**🕒 Volum de Peticions per Franja Horària**")
+            st.caption("Optimització de torns de Recepció i Room Service.")
+            
+            hora_counts = df['Hora'].value_counts().sort_index().reset_index()
+            hora_counts.columns = ['Hora del dia', 'Nombre de Consultes']
+            totes_les_hores = pd.DataFrame({'Hora del dia': range(24)})
+            hora_counts = pd.merge(totes_les_hores, hora_counts, on='Hora del dia', how='left').fillna(0)
+            
+            fig_line = px.area(hora_counts, x='Hora del dia', y='Nombre de Consultes', 
+                               template="plotly_dark" if st.get_option("theme.base") == "dark" else "plotly_white", 
+                               color_discrete_sequence=['#1f77b4'])
+            fig_line.update_xaxes(tickmode='linear', dtick=2)
+            # Fem que el gràfic agafi tota l'amplada
+            st.plotly_chart(fig_line, use_container_width=True)
+
+            st.write("---")
+
+            # Alertes
             if not problemes_df.empty:
                 st.markdown("#### 🚨 Registre d'Incidències Crítiques")
                 st.error("S'han detectat interaccions categoritzades com a PROBLEMA. Cal revisió.")
@@ -449,17 +461,17 @@ if is_admin:
 
     st.write("---")
 
-    # --- 2. GESTIÓ DE FITXERS (DESCARREGAR I PUJAR BACKUPS) ---
-    st.markdown("#### 📂 Gestió de Dades")
+    # Backups
+    st.markdown("#### 📂 Gestió de Dades i Backups")
     col_down, col_up = st.columns(2)
     
     with col_down:
-        st.markdown("**Exportar Històric**")
+        st.markdown("**Exportar Dades (Local)**")
         if os.path.exists("log_consultes.txt"):
             with open("log_consultes.txt", "r", encoding="utf-8") as f:
                 log_data = f.read()
             st.download_button(
-                label="📥 Descarregar Log de Consultes (.txt)",
+                label="📥 Descarregar Log Totes les Habitacions (.txt)",
                 data=log_data,
                 file_name="log_consultes.txt",
                 mime="text/plain"
@@ -468,8 +480,8 @@ if is_admin:
             st.write("No hi ha dades per descarregar.")
 
     with col_up:
-        st.markdown("**Importar Dades (Backups)**")
-        uploaded_file = st.file_uploader("📤 Pujar arxiu de logs (.txt)", type=["txt"], label_visibility="collapsed")
+        st.markdown("**Importar Dades (Demo TFG)**")
+        uploaded_file = st.file_uploader("📤 Pujar arxiu de logs històric (.txt)", type=["txt"], label_visibility="collapsed")
         if uploaded_file is not None:
             if st.button("⚠️ Sobreescriure dades actuals"):
                 with open("log_consultes.txt", "wb") as f:
