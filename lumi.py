@@ -468,7 +468,7 @@ if is_admin:
             st.write("No hi ha dades per descarregar.")
 
     with col_up:
-        st.markdown("**Importar Dades (Demo)**")
+        st.markdown("**Importar Dades (Backups)**")
         uploaded_file = st.file_uploader("📤 Pujar arxiu de logs (.txt)", type=["txt"], label_visibility="collapsed")
         if uploaded_file is not None:
             if st.button("⚠️ Sobreescriure dades actuals"):
