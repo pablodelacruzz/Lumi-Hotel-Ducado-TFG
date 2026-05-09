@@ -448,31 +448,32 @@ if is_admin:
 
             # Alertes i oportunitats
             st.markdown("### 📋 Registre Operatiu i Comercial")
-            col_prob, col_upsell = st.columns(2)
+            
+            # 1. TAULA D'INCIDÈNCIES
+            st.markdown("#### 🚨 Incidències (PROBLEMA)")
+            if not problemes_df.empty:
+                st.dataframe(
+                    problemes_df[['Data', 'Habitació', 'Idioma', 'Pregunta']].sort_values(by='Data', ascending=False),
+                    height=300,
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.success("✨ Cap queixa o incidència reportada recentment.")
 
-            with col_prob:
-                st.markdown("#### 🚨 Incidències (PROBLEMA)")
-                if not problemes_df.empty:
-                    st.dataframe(
-                        problemes_df[['Data', 'Habitació', 'Idioma', 'Pregunta']].sort_values(by='Data', ascending=False),
-                        height=300,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                else:
-                    st.success("✨ Cap queixa o incidència reportada recentment.")
+            st.write("---") # Afegim una línia separadora subtil entre les dues taules
 
-            with col_upsell:
-                st.markdown("#### 📈 Oportunitats d'Upselling")
-                if not upsell_df.empty:
-                    st.dataframe(
-                        upsell_df[['Data', 'Habitació', 'Categoria', 'Pregunta']].sort_values(by='Data', ascending=False),
-                        height=300,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                else:
-                    st.info("Encara no s'han detectat intencions de compra extres.")
+            # 2. TAULA D'UPSELLING
+            st.markdown("#### 📈 Oportunitats d'Upselling")
+            if not upsell_df.empty:
+                st.dataframe(
+                    upsell_df[['Data', 'Habitació', 'Categoria', 'Pregunta']].sort_values(by='Data', ascending=False),
+                    height=300,
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("Encara no s'han detectat intencions de compra extres.")
             # --- FI DEL NOU BLOC ---
         
         else:
