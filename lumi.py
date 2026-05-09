@@ -446,14 +446,35 @@ if is_admin:
 
             st.write("---")
 
-            # Alertes
-            if not problemes_df.empty:
-                st.markdown("#### 🚨 Registre d'Incidències Crítiques")
-                st.error("S'han detectat interaccions categoritzades com a PROBLEMA. Cal revisió.")
-                st.dataframe(problemes_df[['Data', 'Habitació', 'Idioma', 'Pregunta']].sort_values(by='Data', ascending=False).head(5), use_container_width=True)
-            else:
-                st.success("✨ Cap queixa o incidència reportada recentment.")
+            # Alertes i oportunitats
+            st.markdown("### 📋 Registre Operatiu i Comercial")
+            col_prob, col_upsell = st.columns(2)
 
+            with col_prob:
+                st.markdown("#### 🚨 Incidències (PROBLEMA)")
+                if not problemes_df.empty:
+                    st.dataframe(
+                        problemes_df[['Data', 'Habitació', 'Idioma', 'Pregunta']].sort_values(by='Data', ascending=False),
+                        height=300,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.success("✨ Cap queixa o incidència reportada recentment.")
+
+            with col_upsell:
+                st.markdown("#### 📈 Oportunitats d'Upselling")
+                if not upsell_df.empty:
+                    st.dataframe(
+                        upsell_df[['Data', 'Habitació', 'Categoria', 'Pregunta']].sort_values(by='Data', ascending=False),
+                        height=300,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.info("Encara no s'han detectat intencions de compra extres.")
+            # --- FI DEL NOU BLOC ---
+        
         else:
             st.info("No hi ha dades suficients per generar els gràfics.")
     else:
